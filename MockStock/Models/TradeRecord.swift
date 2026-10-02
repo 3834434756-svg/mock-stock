@@ -15,9 +15,10 @@ struct TradeRecord: Identifiable, Codable {
     var name: String
     var side: TradeSide
     var price: Double
-    var shares: Int
+    /// 成交数量。股票是整数，加密货币是小数
+    var shares: Double
     var date: Date
 
-    var amount: Double { price * Double(shares) }
+    var amount: Double { price * shares }
     var market: Market { Market(code: code) }
 }

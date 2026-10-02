@@ -13,7 +13,7 @@ struct QuoteRowView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 5) {
-                    Text(quote.code.uppercased())
+                    Text(quote.displayCode)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                     Text(quote.market.displayName)
@@ -29,7 +29,7 @@ struct QuoteRowView: View {
             Spacer(minLength: 6)
 
             VStack(alignment: .trailing, spacing: 4) {
-                Text(Fmt.price(quote.price))
+                Text(quote.priceLabel)
                     .font(.system(size: 17, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.change(quote.change))
                     .monospacedDigit()

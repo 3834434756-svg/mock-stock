@@ -67,12 +67,12 @@ struct DetailView: View {
         VStack(spacing: 14) {
             if let q = vm.quote {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(Fmt.price(q.price))
+                    Text(q.priceLabel)
                         .font(.system(size: 40, weight: .heavy, design: .rounded))
                         .foregroundStyle(Color.change(q.change))
                         .monospacedDigit()
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(Fmt.signed(q.change))
+                        Text(Fmt.signed(q.displayChange))
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundStyle(Color.change(q.change))
                             .monospacedDigit()
@@ -85,10 +85,10 @@ struct DetailView: View {
                 }
 
                 HStack(spacing: 0) {
-                    infoCell("今开", Fmt.price(q.open))
-                    infoCell("昨收", Fmt.price(q.prevClose))
-                    infoCell("最高", Fmt.price(q.high))
-                    infoCell("最低", Fmt.price(q.low))
+                    infoCell("今开", Fmt.price(q.displayOpen))
+                    infoCell("昨收", Fmt.price(q.displayPrevClose))
+                    infoCell("最高", Fmt.price(q.displayHigh))
+                    infoCell("最低", Fmt.price(q.displayLow))
                 }
 
                 // 休市时数据会停在上一交易日，标出来免得误以为 App 卡住
@@ -133,7 +133,7 @@ struct DetailView: View {
             Text("近 60 日走势")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-            TrendChartView(klines: vm.klines)
+            TrendChartView(klines: vm.klines, code: vm.code)
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.05)))
@@ -151,8 +151,8 @@ struct DetailView: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 0) {
-                infoCell("持股", "\(pos.shares)")
-                infoCell("成本价", Fmt.price(pos.costPrice))
+                infoCell("持有", Fmt.shares(pos.shares))
+                infoCell("成本价", Fmt.marketPrice(pos.costPrice, code: pos.code))
                 infoCell("市值", Fmt.compact(pos.marketValue(price: price)))
                 statCell("浮动盈亏", Fmt.signed(profit), color: Color.change(profit))
             }
@@ -175,7 +175,9 @@ struct DetailView: View {
     }
 
     private var disclaimer: some View {
-        Text("模拟交易，非真实成交。数据仅供学习娱乐，不构成投资建议。")
+        Text(Market(code: vm.code) == .crypto
+             ? "模拟交易，非真实成交。虚拟货币交易在中国大陆不受法律保护，本功能仅供学习娱乐。"
+             : "模拟交易，非真实成交。数据仅供学习娱乐，不构成投资建议。")
             .font(.caption2)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)

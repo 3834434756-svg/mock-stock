@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// 下单面板
+/// 下单面板。
+/// 股票按「股」下单（整数），加密货币按「份额」下单（允许小数，如 0.0153 BTC）。
 struct TradeSheetView: View {
     let code: String
     let name: String
+    /// 人民币折算价。加密货币的报价已乘汇率，记账货币统一是人民币
     let price: Double
     let side: TradeSide
 
@@ -14,16 +16,24 @@ struct TradeSheetView: View {
     @State private var message: String?
     @State private var messageIsError = false
 
-    private var shares: Int { Int(sharesText) ?? 0 }
-    private var amount: Double { price * Double(shares) }
+    private var isCrypto: Bool { Market(code: code) == .crypto }
     private var account: Account { store.account }
-    private var heldShares: Int { account.position(for: code)?.shares ?? 0 }
 
-    private var maxShares: Int {
+    /// 成交数量。股票是整数股，加密货币是小数份额
+    private var shares: Double { Double(sharesText) ?? 0 }
+    private var amount: Double { price * shares }
+    private var heldShares: Double { account.position(for: code)?.shares ?? 0 }
+
+    /// 展示价。加密货币还原成 USDT，跟交易所看到的一致
+    private var displayPrice: Double { isCrypto ? price / FX.usdtToCNY : price }
+
+    private var unit: String { isCrypto ? CryptoCoin.shortName(code) : "股" }
+
+    private var maxShares: Double {
         if side == .sell { return heldShares }
         guard price > 0 else { return 0 }
-        if account.mode.isUnlimited { return 10_000_000 }
-        return Int(account.cash / price)
+        if account.mode.isUnlimited { return 1_000_000 }
+        return account.cash / price
     }
 
     var body: some View {
@@ -33,14 +43,14 @@ struct TradeSheetView: View {
                     HStack {
                         Text(name).font(.headline)
                         Spacer()
-                        Text(code.uppercased())
+                        Text(isCrypto ? CryptoCoin.shortName(code) + "/USDT" : code.uppercased())
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
                     HStack {
                         Text("现价")
                         Spacer()
-                        Text(Fmt.money(price))
+                        Text(isCrypto ? "$" + Fmt.price(displayPrice) : Fmt.money(displayPrice))
                             .font(.system(.body, design: .rounded).weight(.semibold))
                     }
                     HStack {
@@ -48,14 +58,14 @@ struct TradeSheetView: View {
                         Spacer()
                         Text(side == .buy
                              ? Fmt.money(account.cash, unlimited: account.mode.isUnlimited)
-                             : "\(heldShares) 股")
+                             : Fmt.qty(heldShares, code: code))
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                Section("数量（股）") {
-                    TextField("输入股数", text: $sharesText)
-                        .keyboardType(.numberPad)
+                Section("数量（\(unit)）") {
+                    TextField("输入\(unit)数量", text: $sharesText)
+                        .keyboardType(isCrypto ? .decimalPad : .numberPad)
                         .font(.system(.title3, design: .rounded))
 
                     HStack(spacing: 8) {
@@ -72,6 +82,11 @@ struct TradeSheetView: View {
                         Text(Fmt.money(amount))
                             .font(.system(.body, design: .rounded).weight(.bold))
                             .foregroundStyle(side == .buy ? Color.upRed : Color.downGreen)
+                    }
+                    if isCrypto {
+                        Text("按 1 USDT ≈ \(Fmt.price(FX.usdtToCNY)) 元折算")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -110,8 +125,15 @@ struct TradeSheetView: View {
 
     private func quickButton(_ title: String, ratio: Double) -> some View {
         Button(title) {
-            let n = Int(Double(maxShares) * ratio)
-            sharesText = n > 0 ? "\(n)" : ""
+            let n = maxShares * ratio
+            if isCrypto {
+                // 向下截断到 8 位小数：四舍五入可能把金额顶过可用资金，导致「全仓」买不进
+                let truncated = (n * 1e8).rounded(.down) / 1e8
+                sharesText = truncated > 0 ? Fmt.shares(truncated) : ""
+            } else {
+                let i = Int(n)
+                sharesText = i > 0 ? "\(i)" : ""
+            }
         }
         .buttonStyle(.bordered)
         .tint(.secondary)
@@ -130,7 +152,8 @@ struct TradeSheetView: View {
             message = result
             messageIsError = true
         } else {
-            message = "\(side.label)成功：\(shares) 股 @ \(Fmt.price(price))"
+            let priceStr = isCrypto ? "$" + Fmt.price(displayPrice) : Fmt.money(displayPrice)
+            message = "\(side.label)成功：\(Fmt.qty(shares, code: code)) @ \(priceStr)"
             messageIsError = false
             sharesText = ""
         }

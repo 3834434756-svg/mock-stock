@@ -2,8 +2,47 @@ import SwiftUI
 
 /// 数字格式化
 enum Fmt {
+    /// 价格。按量级自适应精度 —— 股票基本都在 1 以上，仍是两位小数；
+    /// 加密货币可能是 0.00001234，固定两位会显示成 0.00
     static func price(_ v: Double) -> String {
-        String(format: "%.2f", v)
+        switch abs(v) {
+        case 1...:           return String(format: "%.2f", v)
+        case 0.1..<1:        return String(format: "%.3f", v)
+        case 0.01..<0.1:     return String(format: "%.4f", v)
+        case 0.0001..<0.01:  return String(format: "%.5f", v)
+        default:             return String(format: "%.8f", v)
+        }
+    }
+
+    /// 价格 + 该市场的货币符号，如 `$85800.02`
+    static func priceText(_ v: Double, code: String) -> String {
+        Market(code: code).currencySymbol + price(v)
+    }
+
+    /// 按市场展示价格。传入的是记账价（人民币），加密货币还原成 USDT；
+    /// 股票不加符号，保持列表原有的清爽观感
+    static func marketPrice(_ v: Double, code: String) -> String {
+        if Market(code: code) == .crypto {
+            return "$" + price(v / FX.usdtToCNY)
+        }
+        return price(v)
+    }
+
+    /// 数量。整数显示为整数，小数去掉尾部零（加密货币用）
+    static func shares(_ v: Double) -> String {
+        if abs(v - v.rounded()) < 1e-9 { return String(format: "%.0f", v) }
+        var s = String(format: "%.8f", v)
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+        return s
+    }
+
+    /// 数量 + 单位，如 `100 股` / `0.0153 BTC`
+    static func qty(_ v: Double, code: String) -> String {
+        if Market(code: code) == .crypto {
+            return "\(shares(v)) \(CryptoCoin.shortName(code))"
+        }
+        return "\(shares(v)) 股"
     }
 
     /// 带符号，用于涨跌额

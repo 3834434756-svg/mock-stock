@@ -42,14 +42,17 @@ final class AccountStore: ObservableObject {
 
     // MARK: - 交易
 
+    /// 浮点容差。加密货币份额是小数，直接比较 `<=` 会因精度误差误判
+    private let eps = 1e-9
+
     /// 买入。返回 nil 表示成功，否则返回错误文案
-    func buy(code: String, name: String, price: Double, shares: Int) -> String? {
-        guard shares > 0 else { return "数量必须大于 0" }
+    func buy(code: String, name: String, price: Double, shares: Double) -> String? {
+        guard shares > eps else { return "数量必须大于 0" }
         guard price > 0 else { return "行情未就绪，请稍后重试" }
 
-        let amount = price * Double(shares)
+        let amount = price * shares
         if !account.mode.isUnlimited {
-            guard amount <= account.cash else {
+            guard amount <= account.cash + 1e-6 else {
                 return "可用资金不足，需要 \(Fmt.money(amount))"
             }
         }
@@ -58,9 +61,9 @@ final class AccountStore: ObservableObject {
         if let idx = account.positions.firstIndex(where: { $0.code == code }) {
             let old = account.positions[idx]
             let totalShares = old.shares + shares
-            let totalCost = old.costPrice * Double(old.shares) + amount
+            let totalCost = old.costPrice * old.shares + amount
             account.positions[idx].shares = totalShares
-            account.positions[idx].costPrice = totalCost / Double(totalShares)
+            account.positions[idx].costPrice = totalCost / totalShares
         } else {
             account.positions.append(Position(code: code, name: name, shares: shares, costPrice: price))
         }
@@ -70,23 +73,23 @@ final class AccountStore: ObservableObject {
     }
 
     /// 卖出。返回 nil 表示成功，否则返回错误文案
-    func sell(code: String, price: Double, shares: Int) -> String? {
-        guard shares > 0 else { return "数量必须大于 0" }
+    func sell(code: String, price: Double, shares: Double) -> String? {
+        guard shares > eps else { return "数量必须大于 0" }
         guard price > 0 else { return "行情未就绪，请稍后重试" }
         guard let idx = account.positions.firstIndex(where: { $0.code == code }) else {
             return "没有该股票的持仓"
         }
 
         let pos = account.positions[idx]
-        guard shares <= pos.shares else {
-            return "持仓不足，最多可卖 \(pos.shares) 股"
+        guard shares <= pos.shares + eps else {
+            return "持仓不足，最多可卖 \(Fmt.qty(pos.shares, code: code))"
         }
 
-        let amount = price * Double(shares)
+        let amount = price * shares
         account.cash += amount
 
         let remain = pos.shares - shares
-        if remain == 0 {
+        if remain <= eps {
             account.positions.remove(at: idx)
         } else {
             account.positions[idx].shares = remain
@@ -96,7 +99,7 @@ final class AccountStore: ObservableObject {
         return nil
     }
 
-    private func pushRecord(code: String, name: String, side: TradeSide, price: Double, shares: Int) {
+    private func pushRecord(code: String, name: String, side: TradeSide, price: Double, shares: Double) {
         let record = TradeRecord(code: code, name: name, side: side, price: price, shares: shares, date: Date())
         account.records.insert(record, at: 0)
         // 只保留最近 200 条

@@ -10,6 +10,7 @@ struct MarketView: View {
         case watchlist = "自选"
         case gainers = "涨幅榜"
         case losers = "跌幅榜"
+        case crypto = "加密货币"
 
         var id: String { rawValue }
     }
@@ -46,8 +47,13 @@ struct MarketView: View {
                 await market.loadPopular()
             }
             .task(id: tab) {
-                if tab != .watchlist {
+                switch tab {
+                case .gainers, .losers:
                     await market.loadRank()
+                case .crypto:
+                    await market.loadCrypto()
+                case .watchlist:
+                    break
                 }
             }
         }
@@ -62,7 +68,70 @@ struct MarketView: View {
             rankContent(mode: .gainers)
         case .losers:
             rankContent(mode: .losers)
+        case .crypto:
+            cryptoContent
         }
+    }
+
+    // MARK: - 加密货币
+
+    private var cryptoContent: some View {
+        List {
+            Section {
+                HStack(spacing: 6) {
+                    Image(systemName: "bolt.fill")
+                        .foregroundStyle(Color.upRed)
+                    Text("24 小时交易，没有开盘收盘 —— 随时都能买卖")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if market.cryptoQuotes.isEmpty {
+                Section {
+                    HStack {
+                        Spacer()
+                        ProgressView("加载中…")
+                        Spacer()
+                    }
+                }
+            } else {
+                Section("加密货币") {
+                    ForEach(market.cryptoQuotes) { q in
+                        NavigationLink {
+                            DetailView(code: q.code, seed: q)
+                        } label: {
+                            QuoteRowView(quote: q)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            if market.isWatched(q.code) {
+                                Button(role: .destructive) {
+                                    market.remove(q.code)
+                                } label: {
+                                    Label("移除", systemImage: "star.slash")
+                                }
+                            } else {
+                                Button {
+                                    market.add(q.code)
+                                } label: {
+                                    Label("加自选", systemImage: "star")
+                                }
+                                .tint(.upRed)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section {
+                Text("行情来自\(CryptoAPI.shared.sourceLabel)公开接口，按 1 USDT ≈ \(Fmt.price(FX.usdtToCNY)) 元折算。"
+                     + "虚拟货币交易在中国大陆不受法律保护，本功能仅供学习娱乐，不构成任何投资建议。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .refreshable { await market.loadCrypto() }
     }
 
     // MARK: - 自选

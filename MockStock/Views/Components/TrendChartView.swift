@@ -4,6 +4,10 @@ import Charts
 /// 收盘价走势图（折线 + 渐变面积）
 struct TrendChartView: View {
     let klines: [KLine]
+    /// 用于 Y 轴价格格式。加密货币的坐标值是人民币折算价，标签要还原成 USDT
+    var code: String = ""
+
+    private var isCrypto: Bool { Market(code: code) == .crypto }
 
     var body: some View {
         if klines.isEmpty {
@@ -52,9 +56,13 @@ struct TrendChartView: View {
             }
         }
         .chartYAxis {
-            AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) { _ in
-                AxisValueLabel()
-                    .foregroundStyle(Color.secondary)
+            AxisMarks(position: .trailing, values: .automatic(desiredCount: 4)) { value in
+                AxisValueLabel {
+                    if let v = value.as(Double.self) {
+                        Text(isCrypto ? Fmt.price(v / FX.usdtToCNY) : Fmt.price(v))
+                            .foregroundStyle(Color.secondary)
+                    }
+                }
                 AxisGridLine().foregroundStyle(Color.white.opacity(0.06))
             }
         }

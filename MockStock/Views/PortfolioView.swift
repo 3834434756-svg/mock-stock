@@ -21,7 +21,19 @@ struct PortfolioView: View {
                 } else {
                     Section("持仓") {
                         ForEach(store.account.positions) { pos in
-                            positionRow(pos)
+                            // 必须能点进详情页 —— 那里才是卖出口
+                            NavigationLink {
+                                DetailView(code: pos.code)
+                            } label: {
+                                positionRow(pos)
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    sellAll(pos)
+                                } label: {
+                                    Label("全部卖出", systemImage: "arrow.down.circle")
+                                }
+                            }
                         }
                     }
                 }
@@ -121,7 +133,7 @@ struct PortfolioView: View {
             HStack(spacing: 8) {
                 Text(pos.name)
                     .font(.system(size: 16, weight: .semibold))
-                Text(pos.code.uppercased())
+                Text(pos.displayCode)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -132,7 +144,7 @@ struct PortfolioView: View {
             }
 
             HStack {
-                Text("\(pos.shares) 股 · 成本 \(Fmt.price(pos.costPrice))")
+                Text("\(Fmt.qty(pos.shares, code: pos.code)) · 成本 \(Fmt.marketPrice(pos.costPrice, code: pos.code))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -171,11 +183,19 @@ struct PortfolioView: View {
                 Text(Fmt.money(r.amount))
                     .font(.system(size: 14, design: .rounded))
                     .monospacedDigit()
-                Text("\(r.shares) 股 @ \(Fmt.price(r.price))")
+                Text("\(Fmt.qty(r.shares, code: r.code)) @ \(Fmt.marketPrice(r.price, code: r.code))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 3)
+    }
+
+    // MARK: - 快捷操作
+
+    /// 左滑一键清仓，按当前行情价成交；行情未就绪时退化为按成本价
+    private func sellAll(_ pos: Position) {
+        let price = vm.quotes[pos.code]?.price ?? pos.costPrice
+        _ = store.sell(code: pos.code, price: price, shares: pos.shares)
     }
 }

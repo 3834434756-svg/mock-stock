@@ -14,6 +14,8 @@ final class MarketViewModel: ObservableObject {
     /// 榜单原始数据（100 只），排序在客户端做
     @Published var rankItems: [RankItem] = []
     @Published var isLoadingRank = false
+    /// 加密货币行情（按 CryptoCoin.all 顺序）
+    @Published var cryptoQuotes: [Quote] = []
 
     enum RankMode: String, CaseIterable, Identifiable {
         case gainers, losers
@@ -59,6 +61,10 @@ final class MarketViewModel: ObservableObject {
         !quotes.isEmpty && quotes.values.allSatisfy { QuoteClock.isToday($0.time) }
     }
 
+    /// 拉自选行情。
+    ///
+    /// 自选里可能同时有股票和加密货币，两者走不同接口，必须分流后合并 ——
+    /// 把 `cbBTCUSDT` 丢给腾讯接口只会拿到空结果。
     func load() async {
         guard !watchlist.isEmpty else {
             quotes = [:]
@@ -66,15 +72,33 @@ final class MarketViewModel: ObservableObject {
         }
         isLoading = true
         defer { isLoading = false }
-        do {
-            let list = try await api.quotes(codes: watchlist)
-            var dict: [String: Quote] = [:]
+
+        let stockCodes = watchlist.filter { Market(code: $0) != .crypto }
+        let cryptoCodes = watchlist.filter { Market(code: $0) == .crypto }
+
+        var dict: [String: Quote] = [:]
+
+        if !stockCodes.isEmpty, let list = try? await api.quotes(codes: stockCodes) {
             for q in list { dict[q.code] = q }
-            quotes = dict
-            lastError = nil
-        } catch {
-            lastError = "行情获取失败，请检查网络"
         }
+        if !cryptoCodes.isEmpty {
+            let symbols = cryptoCodes.map { String($0.dropFirst(2)) }
+            if let list = try? await CryptoAPI.shared.quotes(symbols: symbols) {
+                for q in list { dict[q.code] = q }
+            }
+        }
+
+        // 合并而非整体替换：某一路接口临时失败时，另一路的好数据不该被清掉
+        quotes.merge(dict) { _, new in new }
+        lastError = quotes.isEmpty ? "行情获取失败，请检查网络" : nil
+    }
+
+    /// 拉加密货币行情（币安接口，24 小时交易）
+    func loadCrypto() async {
+        guard let list = try? await CryptoAPI.shared.quotes(symbols: CryptoCoin.allSymbols) else { return }
+        var dict: [String: Quote] = [:]
+        for q in list { dict[q.code] = q }
+        cryptoQuotes = CryptoCoin.allCodes.compactMap { dict[$0] }
     }
 
     /// 拉热门股行情。只在首次进入时拉一次，之后跟随轮询刷新
@@ -136,6 +160,7 @@ final class MarketViewModel: ObservableObject {
             Task { @MainActor in
                 await self?.load()
                 await self?.loadPopular()
+                await self?.loadCrypto()
             }
         }
     }
