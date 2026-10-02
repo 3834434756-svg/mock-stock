@@ -38,8 +38,9 @@ targets:
       path: MockStock/Info.plist
       properties:
         CFBundleDisplayName: 模拟股神
-        CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "1"
+        # 引用 settings 里的版本号，避免两处各写一份导致对不上
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
