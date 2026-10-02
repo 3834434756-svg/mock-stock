@@ -24,4 +24,16 @@ final class PortfolioViewModel: ObservableObject {
             quotes = dict
         }
     }
+
+    // MARK: - 数据新鲜度
+
+    /// 持仓里最新的一条行情时间，形如 `09-30 16:14`
+    var latestQuoteTime: String? {
+        quotes.values.compactMap { QuoteClock.display($0.time) }.max()
+    }
+
+    /// 是否所有持仓的行情都是今天的数据
+    var allQuotesToday: Bool {
+        !quotes.isEmpty && quotes.values.allSatisfy { QuoteClock.isToday($0.time) }
+    }
 }

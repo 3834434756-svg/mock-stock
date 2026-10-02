@@ -119,6 +119,14 @@ struct MarketView: View {
             }
 
             Section {
+                if let t = market.latestWatchTime {
+                    HStack(spacing: 5) {
+                        Image(systemName: market.watchQuotesToday ? "clock" : "exclamationmark.triangle.fill")
+                        Text(market.watchQuotesToday ? "行情更新于 \(t)" : "行情停留在 \(t)（非实时）")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(market.watchQuotesToday ? Color.secondary : Color.orange)
+                }
                 Text("行情来自腾讯财经公开接口，仅供学习娱乐，不构成投资建议。")
                     .font(.caption)
                     .foregroundStyle(.secondary)

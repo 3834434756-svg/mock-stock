@@ -40,7 +40,14 @@ struct PortfolioView: View {
                 await vm.refresh(positions: store.account.positions)
             }
             .task {
+                // 进入页面先拉一次，之后每 15 秒自动刷新浮动盈亏。
+                // 视图消失（切 Tab / 返回）时 task 会被自动取消，无需手动停表。
                 await vm.refresh(positions: store.account.positions)
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                    if Task.isCancelled { break }
+                    await vm.refresh(positions: store.account.positions)
+                }
             }
         }
     }
@@ -75,6 +82,16 @@ struct PortfolioView: View {
                 statBlock("可用资金", unlimited ? "∞" : Fmt.compact(store.account.cash))
                 statBlock("持仓市值", Fmt.compact(store.account.positionsValue(quotes: quotes)))
                 statBlock("总收益", unlimited ? "—" : Fmt.percent(ret), color: Color.change(ret))
+            }
+
+            // 数据新鲜度：休市时行情会停在上一交易日，必须让用户看得见
+            if let t = vm.latestQuoteTime {
+                HStack(spacing: 5) {
+                    Image(systemName: vm.allQuotesToday ? "clock" : "exclamationmark.triangle.fill")
+                    Text(vm.allQuotesToday ? "行情更新于 \(t)" : "行情停留在 \(t)（非实时）")
+                }
+                .font(.caption2)
+                .foregroundStyle(vm.allQuotesToday ? Color.secondary : Color.orange)
             }
         }
         .padding(.vertical, 8)

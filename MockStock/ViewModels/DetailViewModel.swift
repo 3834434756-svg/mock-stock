@@ -39,4 +39,12 @@ final class DetailViewModel: ObservableObject {
             klines = ks
         }
     }
+
+    /// 只刷新报价。K线一天才变一次，轮询时没必要重拉。
+    func refreshQuote() async {
+        guard let list = try? await api.quotes(codes: [code]),
+              let first = list.first else { return }
+        quote = first
+        errorText = nil
+    }
 }

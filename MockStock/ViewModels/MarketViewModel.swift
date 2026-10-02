@@ -49,6 +49,16 @@ final class MarketViewModel: ObservableObject {
         watchlist.compactMap { quotes[$0] }
     }
 
+    /// 自选里最新的一条行情时间，形如 `09-30 16:14`
+    var latestWatchTime: String? {
+        quotes.values.compactMap { QuoteClock.display($0.time) }.max()
+    }
+
+    /// 自选行情是否都是今天的数据（休市时会为 false）
+    var watchQuotesToday: Bool {
+        !quotes.isEmpty && quotes.values.allSatisfy { QuoteClock.isToday($0.time) }
+    }
+
     func load() async {
         guard !watchlist.isEmpty else {
             quotes = [:]

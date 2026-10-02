@@ -41,7 +41,15 @@ struct DetailView: View {
                 .accessibilityLabel(market.isWatched(vm.code) ? "移出自选" : "加入自选")
             }
         }
-        .task { await vm.load() }
+        .task {
+            await vm.load()
+            // 停在详情页时也保持报价新鲜
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                if Task.isCancelled { break }
+                await vm.refreshQuote()
+            }
+        }
         .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(item: $tradeSide) { side in
             TradeSheetView(
@@ -81,6 +89,17 @@ struct DetailView: View {
                     infoCell("昨收", Fmt.price(q.prevClose))
                     infoCell("最高", Fmt.price(q.high))
                     infoCell("最低", Fmt.price(q.low))
+                }
+
+                // 休市时数据会停在上一交易日，标出来免得误以为 App 卡住
+                if let t = QuoteClock.display(q.time) {
+                    HStack(spacing: 5) {
+                        Image(systemName: QuoteClock.isToday(q.time) ? "clock" : "exclamationmark.triangle.fill")
+                        Text(QuoteClock.isToday(q.time) ? "行情更新于 \(t)" : "行情停留在 \(t)（非实时）")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(QuoteClock.isToday(q.time) ? Color.secondary : Color.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else if vm.isLoading {
                 ProgressView().frame(height: 130)
