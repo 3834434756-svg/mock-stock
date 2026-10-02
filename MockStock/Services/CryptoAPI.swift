@@ -80,8 +80,26 @@ final class CryptoAPI {
 
     // MARK: - 币安
 
-    /// 币安批量行情。symbols 参数要求是 JSON 数组字面量
+    /// 币安批量行情。
+    ///
+    /// 坑点：这个接口是「全有或全无」—— 只要 `symbols` 里有一个交易对非法或已下架，
+    /// 整批返回 400，一个价格都拿不到。所以先整批试，失败就拆成小片分别请求，
+    /// 坏掉的那一片不会拖垮其余的币。
     private func binanceQuotes(_ symbols: [String]) async -> [Quote]? {
+        if let list = await binanceBatch(symbols), !list.isEmpty { return list }
+
+        // 分片降级：每片 10 个，逐片请求
+        var out: [Quote] = []
+        for chunk in symbols.chunked(into: 10) {
+            if let list = await binanceBatch(chunk) {
+                out.append(contentsOf: list)
+            }
+        }
+        return out.isEmpty ? nil : out
+    }
+
+    private func binanceBatch(_ symbols: [String]) async -> [Quote]? {
+        guard !symbols.isEmpty else { return nil }
         let json = "[" + symbols.map { "\"\($0)\"" }.joined(separator: ",") + "]"
         guard let encoded = json.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: "https://api.binance.com/api/v3/ticker/24hr?symbols=\(encoded)"),
@@ -251,5 +269,15 @@ final class CryptoAPI {
         fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
         fmt.timeZone = TimeZone(identifier: "Asia/Shanghai")
         return fmt.string(from: Date())
+    }
+}
+
+extension Array {
+    /// 按固定长度切片。用于把一长串交易对拆成多批请求
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0 else { return isEmpty ? [] : [self] }
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
     }
 }

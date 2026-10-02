@@ -17,6 +17,9 @@ final class MarketViewModel: ObservableObject {
     /// 加密货币行情（按 CryptoCoin.all 顺序）
     @Published var cryptoQuotes: [Quote] = []
 
+    /// 上一次的总资产，用于触发盈亏爽感反馈
+    private var lastTotal: Double?
+
     enum RankMode: String, CaseIterable, Identifiable {
         case gainers, losers
 
@@ -32,11 +35,14 @@ final class MarketViewModel: ObservableObject {
         }
     }
 
-    private let api = MarketAPI.shared
+    private let provider = QuoteProvider.shared
     private let watchKey = "mockstock.watchlist.v1"
     private var timer: Timer?
 
     static let defaultWatchlist = ["sh600519", "sz000001", "hk00700", "usAAPL", "usTSLA"]
+
+    /// 当前是否游戏世界
+    var isGame: Bool { AccountStore.shared.isGame }
 
     init() {
         if let saved = UserDefaults.standard.array(forKey: watchKey) as? [String], !saved.isEmpty {
@@ -53,58 +59,73 @@ final class MarketViewModel: ObservableObject {
 
     /// 自选里最新的一条行情时间，形如 `09-30 16:14`
     var latestWatchTime: String? {
-        quotes.values.compactMap { QuoteClock.display($0.time) }.max()
+        sortedQuotes.compactMap { QuoteClock.display($0.time) }.max()
     }
 
     /// 自选行情是否都是今天的数据（休市时会为 false）
     var watchQuotesToday: Bool {
-        !quotes.isEmpty && quotes.values.allSatisfy { QuoteClock.isToday($0.time) }
+        let list = sortedQuotes
+        return !list.isEmpty && list.allSatisfy { QuoteClock.isToday($0.time) }
     }
 
-    /// 拉自选行情。
+    /// 当前所有已知价格，供挂单撮合 / 强平 / 成就判定
+    var allPrices: [String: Double] {
+        var d: [String: Double] = [:]
+        for (k, v) in quotes { d[k] = v.price }
+        for q in cryptoQuotes { d[q.code] = q.price }
+        for q in popularQuotes { d[q.code] = q.price }
+        for (k, v) in GameEngine.shared.sims { d[k] = v.price }
+        return d
+    }
+
+    // MARK: - 拉取
+
+    /// 拉自选行情。自选里可能同时有股票和加密货币，路由层会分流。
     ///
-    /// 自选里可能同时有股票和加密货币，两者走不同接口，必须分流后合并 ——
-    /// 把 `cbBTCUSDT` 丢给腾讯接口只会拿到空结果。
+    /// 除了自选，还会顺带拉一次挂单标的的行情 —— 否则挂在自选之外的限价单
+    /// 永远等不到价格，撮合不了。
     func load() async {
-        guard !watchlist.isEmpty else {
+        var codes = watchlist
+        codes.append(contentsOf: OrderCenter.shared.pending.map(\.code))
+        let unique = Array(Set(codes))
+
+        guard !unique.isEmpty else {
             quotes = [:]
             return
         }
         isLoading = true
         defer { isLoading = false }
 
-        let stockCodes = watchlist.filter { Market(code: $0) != .crypto }
-        let cryptoCodes = watchlist.filter { Market(code: $0) == .crypto }
-
+        let list = await provider.quotes(codes: unique)
         var dict: [String: Quote] = [:]
-
-        if !stockCodes.isEmpty, let list = try? await api.quotes(codes: stockCodes) {
-            for q in list { dict[q.code] = q }
-        }
-        if !cryptoCodes.isEmpty {
-            let symbols = cryptoCodes.map { String($0.dropFirst(2)) }
-            if let list = try? await CryptoAPI.shared.quotes(symbols: symbols) {
-                for q in list { dict[q.code] = q }
-            }
-        }
+        for q in list { dict[q.code] = q }
 
         // 合并而非整体替换：某一路接口临时失败时，另一路的好数据不该被清掉
         quotes.merge(dict) { _, new in new }
-        lastError = quotes.isEmpty ? "行情获取失败，请检查网络" : nil
+        lastError = watchlist.isEmpty ? nil : (sortedQuotes.isEmpty ? "行情获取失败，请检查网络" : nil)
+        afterRefresh()
     }
 
-    /// 拉加密货币行情（币安接口，24 小时交易）
+    /// 拉加密货币行情。
+    ///
+    /// 币圈 24 小时不打烊，所以**两个世界都要刷** —— 现实虚拟盘里也一样，
+    /// 之前只在游戏模式刷，导致现实模式下加密货币列表的价格一直停着不动。
     func loadCrypto() async {
-        guard let list = try? await CryptoAPI.shared.quotes(symbols: CryptoCoin.allSymbols) else { return }
+        let list = await provider.cryptoQuotes(symbols: CryptoCoin.allSymbols)
+        guard !list.isEmpty else { return }
         var dict: [String: Quote] = [:]
         for q in list { dict[q.code] = q }
-        cryptoQuotes = CryptoCoin.allCodes.compactMap { dict[$0] }
+        // 按币种表顺序排列；接口这次没返回的沿用上一轮的值，
+        // 避免偶发丢包让整行价格闪成空白
+        let old = Dictionary(cryptoQuotes.map { ($0.code, $0) }, uniquingKeysWith: { a, _ in a })
+        cryptoQuotes = CryptoCoin.allCodes.compactMap { dict[$0] ?? old[$0] }
+        afterRefresh()
     }
 
-    /// 拉热门股行情。只在首次进入时拉一次，之后跟随轮询刷新
+    /// 拉热门股行情
     func loadPopular() async {
         let codes = PopularStocks.allCodes
-        guard let list = try? await api.quotes(codes: codes) else { return }
+        let list = await provider.quotes(codes: codes)
         var dict: [String: Quote] = [:]
         for q in list { dict[q.code] = q }
         popularQuotes = codes.compactMap { dict[$0] }
@@ -114,10 +135,38 @@ final class MarketViewModel: ObservableObject {
     func loadRank() async {
         isLoadingRank = true
         defer { isLoadingRank = false }
-        if let list = try? await api.rankList() {
-            rankItems = list
-        }
+        let list = await provider.rank()
+        if !list.isEmpty { rankItems = list }
     }
+
+    // MARK: - 刷新后的连带处理
+
+    /// 每次拿到新价格后要做的事：撮合挂单 → 检查强平 → 判定成就 → 触发爽感
+    private func afterRefresh() {
+        let prices = allPrices
+        guard !prices.isEmpty else { return }
+
+        let fresh = Set(quotes.values.filter { QuoteClock.isToday($0.time) }.map(\.code))
+        OrderCenter.shared.process(prices: prices, freshCodes: fresh)
+
+        let store = AccountStore.shared
+        store.checkLiquidations(prices: prices)
+
+        let total = store.account.totalAssets(prices: prices)
+        if let prev = lastTotal {
+            let base = store.account.mode.initialCapital
+            if base > 0, abs(total - prev) > base * 0.01 {
+                let ratio = (total - prev) / base
+                if ratio > 0 { Juice.profit(ratio: ratio) } else { Juice.loss(ratio: ratio) }
+            }
+        }
+        lastTotal = total
+
+        AchievementCenter.shared.evaluateSnapshot(account: store.account,
+                                                   totalAssets: total, prices: prices)
+    }
+
+    // MARK: - 自选管理
 
     func add(_ code: String) {
         guard !watchlist.contains(code) else { return }
@@ -154,13 +203,18 @@ final class MarketViewModel: ObservableObject {
 
     // MARK: - 轮询
 
+    /// 游戏模式本地模拟，刷新可以很快；现实模式要顾及接口压力，保持 15 秒
+    var pollInterval: TimeInterval { isGame ? 2 : 15 }
+
     func startPolling() {
         stopPolling()
-        timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                await self?.load()
-                await self?.loadPopular()
-                await self?.loadCrypto()
+                guard let self else { return }
+                await self.load()
+                await self.loadPopular()
+                // 加密货币 24 小时交易，两种世界都必须跟着刷
+                await self.loadCrypto()
             }
         }
     }

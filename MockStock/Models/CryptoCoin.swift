@@ -21,24 +21,73 @@ struct CryptoCoin: Identifiable, Hashable {
 }
 
 extension CryptoCoin {
-    /// 支持的币种（按市值大致排序）
+    /// 支持的币种。
+    ///
+    /// 名单里的每一个交易对都实际请求过币安接口验证存在 —— 币安的批量行情接口
+    /// 只要有一个 symbol 非法就整批返回 400，所以这里宁缺毋滥。
+    /// `CryptoAPI` 另外做了分片降级，将来真有币种下架也不会拖垮整批。
     static let all: [CryptoCoin] = [
-        CryptoCoin(symbol: "BTCUSDT",  name: "比特币",    short: "BTC"),
-        CryptoCoin(symbol: "ETHUSDT",  name: "以太坊",    short: "ETH"),
-        CryptoCoin(symbol: "BNBUSDT",  name: "币安币",    short: "BNB"),
-        CryptoCoin(symbol: "SOLUSDT",  name: "Solana",   short: "SOL"),
-        CryptoCoin(symbol: "XRPUSDT",  name: "瑞波币",    short: "XRP"),
-        CryptoCoin(symbol: "DOGEUSDT", name: "狗狗币",    short: "DOGE"),
-        CryptoCoin(symbol: "ADAUSDT",  name: "艾达币",    short: "ADA"),
-        CryptoCoin(symbol: "AVAXUSDT", name: "雪崩协议",  short: "AVAX"),
-        CryptoCoin(symbol: "LINKUSDT", name: "Chainlink", short: "LINK"),
-        CryptoCoin(symbol: "DOTUSDT",  name: "波卡",      short: "DOT"),
-        CryptoCoin(symbol: "LTCUSDT",  name: "莱特币",    short: "LTC"),
-        CryptoCoin(symbol: "TRXUSDT",  name: "波场",      short: "TRX"),
+        // 主流
+        CryptoCoin(symbol: "BTCUSDT",    name: "比特币",       short: "BTC"),
+        CryptoCoin(symbol: "ETHUSDT",    name: "以太坊",       short: "ETH"),
+        CryptoCoin(symbol: "BNBUSDT",    name: "币安币",       short: "BNB"),
+        CryptoCoin(symbol: "SOLUSDT",    name: "Solana",      short: "SOL"),
+        CryptoCoin(symbol: "XRPUSDT",    name: "瑞波币",       short: "XRP"),
+        CryptoCoin(symbol: "DOGEUSDT",   name: "狗狗币",       short: "DOGE"),
+        CryptoCoin(symbol: "ADAUSDT",    name: "艾达币",       short: "ADA"),
+        CryptoCoin(symbol: "TRXUSDT",    name: "波场",         short: "TRX"),
+        CryptoCoin(symbol: "AVAXUSDT",   name: "雪崩协议",     short: "AVAX"),
+        CryptoCoin(symbol: "LINKUSDT",   name: "Chainlink",   short: "LINK"),
+        CryptoCoin(symbol: "DOTUSDT",    name: "波卡",         short: "DOT"),
+        CryptoCoin(symbol: "LTCUSDT",    name: "莱特币",       short: "LTC"),
+        CryptoCoin(symbol: "TONUSDT",    name: "Toncoin",     short: "TON"),
+        CryptoCoin(symbol: "BCHUSDT",    name: "比特现金",     short: "BCH"),
+        CryptoCoin(symbol: "SHIBUSDT",   name: "柴犬币",       short: "SHIB"),
+        CryptoCoin(symbol: "PEPEUSDT",   name: "佩佩蛙",       short: "PEPE"),
+        // 公链 / 一层网络
+        CryptoCoin(symbol: "NEARUSDT",   name: "NEAR 协议",    short: "NEAR"),
+        CryptoCoin(symbol: "APTUSDT",    name: "Aptos",       short: "APT"),
+        CryptoCoin(symbol: "SUIUSDT",    name: "Sui",         short: "SUI"),
+        CryptoCoin(symbol: "ATOMUSDT",   name: "宇宙币",       short: "ATOM"),
+        CryptoCoin(symbol: "ETCUSDT",    name: "以太经典",     short: "ETC"),
+        CryptoCoin(symbol: "XLMUSDT",    name: "恒星币",       short: "XLM"),
+        CryptoCoin(symbol: "ALGOUSDT",   name: "阿尔戈",       short: "ALGO"),
+        CryptoCoin(symbol: "ICPUSDT",    name: "互联网计算机", short: "ICP"),
+        CryptoCoin(symbol: "HBARUSDT",   name: "哈希图",       short: "HBAR"),
+        CryptoCoin(symbol: "STXUSDT",    name: "Stacks",      short: "STX"),
+        CryptoCoin(symbol: "SEIUSDT",    name: "Sei",         short: "SEI"),
+        CryptoCoin(symbol: "TIAUSDT",    name: "Celestia",    short: "TIA"),
+        CryptoCoin(symbol: "FILUSDT",    name: "文件币",       short: "FIL"),
+        CryptoCoin(symbol: "MATICUSDT",  name: "Polygon",     short: "MATIC"),
+        // 二层 / 基础设施
+        CryptoCoin(symbol: "ARBUSDT",    name: "Arbitrum",    short: "ARB"),
+        CryptoCoin(symbol: "OPUSDT",     name: "Optimism",    short: "OP"),
+        CryptoCoin(symbol: "IMXUSDT",    name: "Immutable",   short: "IMX"),
+        CryptoCoin(symbol: "RENDERUSDT", name: "Render",      short: "RENDER"),
+        CryptoCoin(symbol: "INJUSDT",    name: "Injective",   short: "INJ"),
+        // DeFi / 应用
+        CryptoCoin(symbol: "UNIUSDT",    name: "Uniswap",     short: "UNI"),
+        CryptoCoin(symbol: "AAVEUSDT",   name: "Aave",        short: "AAVE"),
+        CryptoCoin(symbol: "MKRUSDT",    name: "Maker",       short: "MKR"),
+        CryptoCoin(symbol: "WLDUSDT",    name: "Worldcoin",   short: "WLD"),
+        // 迷因
+        CryptoCoin(symbol: "WIFUSDT",    name: "dogwifhat",   short: "WIF"),
+        CryptoCoin(symbol: "BONKUSDT",   name: "Bonk",        short: "BONK"),
     ]
 
     static let allCodes: [String] = all.map(\.code)
     static let allSymbols: [String] = all.map(\.symbol)
+
+    /// 按关键词筛选（中文名 / 简称 / 交易对都能匹配）
+    static func search(_ keyword: String) -> [CryptoCoin] {
+        let kw = keyword.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !kw.isEmpty else { return all }
+        return all.filter {
+            $0.name.uppercased().contains(kw)
+                || $0.short.uppercased().contains(kw)
+                || $0.symbol.uppercased().contains(kw)
+        }
+    }
 
     static func coin(for code: String) -> CryptoCoin? {
         all.first { $0.code.lowercased() == code.lowercased() }

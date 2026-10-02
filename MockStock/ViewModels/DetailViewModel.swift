@@ -10,7 +10,7 @@ final class DetailViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorText: String?
 
-    private let api = MarketAPI.shared
+    private let provider = QuoteProvider.shared
 
     init(code: String, seed: Quote? = nil) {
         self.code = code
@@ -21,7 +21,22 @@ final class DetailViewModel: ObservableObject {
         quote?.name ?? code.uppercased()
     }
 
-    private var isCrypto: Bool { Market(code: code) == .crypto }
+    var isGame: Bool { AccountStore.shared.isGame }
+
+    /// 轮询间隔。游戏模式价格本地模拟，刷新可以更快
+    var pollInterval: TimeInterval { isGame ? 2 : 15 }
+
+    /// 买卖点标记。数据来自本地成交记录，按日期贴到 K 线上
+    var markers: [ChartMarker] {
+        let records = AccountStore.shared.account.records.filter { $0.code == code }
+        guard !records.isEmpty else { return [] }
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        return records.map {
+            ChartMarker(date: f.string(from: $0.date), price: $0.price, side: $0.side)
+        }
+    }
 
     func load() async {
         isLoading = true
@@ -34,9 +49,8 @@ final class DetailViewModel: ObservableObject {
             errorText = "行情加载失败"
         }
 
-        if let ks = await fetchKlines() {
-            klines = ks
-        }
+        let ks = await provider.klines(code: code, count: 60)
+        if !ks.isEmpty { klines = ks }
     }
 
     /// 只刷新报价。K线一天才变一次，轮询时没必要重拉。
@@ -46,22 +60,7 @@ final class DetailViewModel: ObservableObject {
         errorText = nil
     }
 
-    // MARK: - 分流
-
-    /// 股票走腾讯接口，加密货币走币安接口
     private func fetchQuote() async -> Quote? {
-        if isCrypto {
-            let symbol = String(code.dropFirst(2))
-            return (try? await CryptoAPI.shared.quotes(symbols: [symbol]))?.first
-        }
-        return (try? await api.quotes(codes: [code]))?.first
-    }
-
-    private func fetchKlines() async -> [KLine]? {
-        if isCrypto {
-            let symbol = String(code.dropFirst(2))
-            return try? await CryptoAPI.shared.klines(symbol: symbol, count: 60)
-        }
-        return try? await api.klines(code: code, count: 60)
+        await provider.quotes(codes: [code]).first
     }
 }

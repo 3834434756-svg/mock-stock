@@ -3,8 +3,15 @@ import SwiftUI
 /// 行情页：自选（含热门股一键加自选）+ 涨幅榜 / 跌幅榜
 struct MarketView: View {
     @EnvironmentObject private var market: MarketViewModel
-    @State private var showSearch = false
+    @State private var sheet: ActiveSheet?
+    @State private var cryptoKeyword = ""
     @State private var tab: MarketTab = .watchlist
+
+    /// 同一个视图上挂两个 `.sheet` 在 iOS 上不可靠，统一用一个枚举驱动
+    enum ActiveSheet: String, Identifiable {
+        case search, orders
+        var id: String { rawValue }
+    }
 
     enum MarketTab: String, CaseIterable, Identifiable {
         case watchlist = "自选"
@@ -33,15 +40,27 @@ struct MarketView: View {
             .navigationTitle("行情")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showSearch = true
+                    Menu {
+                        Button {
+                            sheet = .search
+                        } label: {
+                            Label("搜索股票", systemImage: "magnifyingglass")
+                        }
+                        Button {
+                            sheet = .orders
+                        } label: {
+                            Label("我的挂单", systemImage: "clock.arrow.circlepath")
+                        }
                     } label: {
-                        Image(systemName: "magnifyingglass")
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
             }
-            .sheet(isPresented: $showSearch) {
-                SearchView()
+            .sheet(item: $sheet) { item in
+                switch item {
+                case .search: SearchView()
+                case .orders: NavigationStack { PendingOrdersView() }
+                }
             }
             .task {
                 await market.loadPopular()
@@ -56,6 +75,15 @@ struct MarketView: View {
                     break
                 }
             }
+        }
+    }
+
+    /// 自选里出现过、且现在关着门的市场。用来展示 NPC 作息卡
+    private var closedMarkets: [Market] {
+        guard !market.isGame else { return [] }
+        let present = Set(market.sortedQuotes.map(\.market))
+        return [Market.aShare, .hk, .us].filter {
+            present.contains($0) && !MarketClock.isOpenNow($0)
         }
     }
 
@@ -75,15 +103,42 @@ struct MarketView: View {
 
     // MARK: - 加密货币
 
+    private var filteredCrypto: [Quote] {
+        guard !cryptoKeyword.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return market.cryptoQuotes
+        }
+        let allowed = Set(CryptoCoin.search(cryptoKeyword).map(\.code))
+        return market.cryptoQuotes.filter { allowed.contains($0.code) }
+    }
+
     private var cryptoContent: some View {
         List {
             Section {
                 HStack(spacing: 6) {
                     Image(systemName: "bolt.fill")
                         .foregroundStyle(Color.upRed)
-                    Text("24 小时交易，没有开盘收盘 —— 随时都能买卖")
+                    Text("24 小时交易，没有开盘收盘 —— 随时都能买卖，\(CryptoCoin.all.count) 个币种")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                    TextField("搜索币种（BTC / 以太坊 / SOL…）", text: $cryptoKeyword)
+                        .font(.system(size: 14))
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.characters)
+                    if !cryptoKeyword.isEmpty {
+                        Button {
+                            cryptoKeyword = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
 
@@ -95,9 +150,15 @@ struct MarketView: View {
                         Spacer()
                     }
                 }
+            } else if filteredCrypto.isEmpty {
+                Section {
+                    Text("没有匹配的币种")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 Section("加密货币") {
-                    ForEach(market.cryptoQuotes) { q in
+                    ForEach(filteredCrypto) { q in
                         NavigationLink {
                             DetailView(code: q.code, seed: q)
                         } label: {
@@ -138,6 +199,29 @@ struct MarketView: View {
 
     private var watchlistContent: some View {
         List {
+            // 休市时，把「市场关门」讲成一幕 NPC 作息，而不是让价格无声地冻住
+            if !closedMarkets.isEmpty {
+                Section {
+                    ForEach(closedMarkets, id: \.self) { m in
+                        MarketClosedCard(market: m) { sheet = .orders }
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowBackground(Color.clear)
+                    }
+                }
+            }
+
+            if market.isGame {
+                Section {
+                    HStack(spacing: 6) {
+                        Image(systemName: "gamecontroller.fill")
+                            .foregroundStyle(Color(red: 0.66, green: 0.33, blue: 0.97))
+                        Text("游戏模式：价格由本地引擎模拟，永不休市。去「我的」看成就。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             if !market.popularQuotes.isEmpty {
                 Section("热门股 · 一键加自选") {
                     ScrollView(.horizontal, showsIndicators: false) {

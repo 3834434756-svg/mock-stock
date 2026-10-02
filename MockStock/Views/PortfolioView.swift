@@ -52,11 +52,11 @@ struct PortfolioView: View {
                 await vm.refresh(positions: store.account.positions)
             }
             .task {
-                // 进入页面先拉一次，之后每 15 秒自动刷新浮动盈亏。
+                // 进入页面先拉一次，之后自动刷新浮动盈亏（游戏模式 2 秒 / 现实模式 15 秒）。
                 // 视图消失（切 Tab / 返回）时 task 会被自动取消，无需手动停表。
                 await vm.refresh(positions: store.account.positions)
                 while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                    try? await Task.sleep(nanoseconds: UInt64(vm.pollInterval * 1_000_000_000))
                     if Task.isCancelled { break }
                     await vm.refresh(positions: store.account.positions)
                 }

@@ -20,19 +20,27 @@ enum GameMode: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// 初始资金。无限模式给一个大数（不用 .infinity，否则 JSON 编码会失败）
+    /// 初始资金。无限模式给一个大数（不用 .infinity，否则 JSON 编码会失败）。
+    /// 界面上无限模式一律显示 ∞，所以这个数字只是给「庄家本庄」「特斯拉私有化」
+    /// 这类大额成就留出空间。
     var initialCapital: Double {
         switch self {
         case .hard: return 1_000
         case .fromZero: return 10_000
         case .steady: return 100_000
         case .easy: return 1_000_000
-        case .unlimited: return 1_000_000_000
+        case .unlimited: return 10_000_000_000_000   // 10 万亿
         }
     }
 
     /// 资金是否无限（买入不做余额校验）
     var isUnlimited: Bool { self == .unlimited }
+
+    /// 单笔「全仓」的参考金额。无限模式下不能真的拿全部资金去买，
+    /// 否则一笔就把所有标的扫空了
+    var notionalPerAllIn: Double {
+        isUnlimited ? 10_000_000_000 : initialCapital   // 100 亿
+    }
 
     var subtitle: String {
         switch self {

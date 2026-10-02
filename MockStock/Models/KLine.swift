@@ -20,6 +20,16 @@ struct KLine: Identifiable {
     }()
 
     var dateValue: Date {
-        Self.formatter.date(from: date) ?? Date()
+        Self.parse(date)
+    }
+
+    /// 把 `yyyy-MM-dd` 解析成 Date（也供买卖点标记复用）
+    static func parse(_ s: String) -> Date {
+        formatter.date(from: s) ?? Date()
+    }
+
+    /// 把 Date 格式化成 `yyyy-MM-dd`
+    static func string(_ d: Date) -> String {
+        formatter.string(from: d)
     }
 }

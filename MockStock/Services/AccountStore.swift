@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// 账户与交易引擎（本地模拟撮合 + 持久化）
 @MainActor
@@ -14,6 +15,9 @@ final class AccountStore: ObservableObject {
         didSet { save() }
     }
 
+    /// 最近一次爆仓提示，展示完清空
+    @Published var liquidationNotice: String?
+
     private let accountKey = "mockstock.account.v2"
     private let setupKey = "mockstock.needsSetup.v2"
 
@@ -26,18 +30,44 @@ final class AccountStore: ObservableObject {
             self.account = .fresh(.steady)
             self.needsSetup = true
         }
+
+        // 冷启动时如果是游戏模式，引擎和事件中心要重新跑起来
+        // （Timer 不会跨进程存活，重启后必须显式 start）
+        if !needsSetup, account.world == .game {
+            GameEngine.shared.start()
+            EventCenter.shared.start()
+        }
     }
 
-    // MARK: - 模式
+    // MARK: - 世界 / 模式
 
-    func chooseMode(_ mode: GameMode) {
-        account = .fresh(mode)
+    var world: TradingWorld { account.world }
+    var isGame: Bool { account.world == .game }
+
+    /// 开始新的一局
+    func choose(world: TradingWorld, mode: GameMode) {
+        account = .fresh(world: world, mode)
         needsSetup = false
+
+        AchievementCenter.shared.reset(baseline: mode.initialCapital)
+        OrderCenter.shared.clear()
+        EventCenter.shared.reset()
+        GameEngine.shared.reset()
+
+        if world == .game {
+            GameEngine.shared.start()
+            EventCenter.shared.start()
+        } else {
+            EventCenter.shared.stop()
+        }
+        save()
     }
 
     /// 重置账户，回到模式选择
     func resetToSetup() {
         needsSetup = true
+        GameEngine.shared.stop()
+        EventCenter.shared.stop()
     }
 
     // MARK: - 交易
@@ -46,17 +76,30 @@ final class AccountStore: ObservableObject {
     private let eps = 1e-9
 
     /// 买入。返回 nil 表示成功，否则返回错误文案
-    func buy(code: String, name: String, price: Double, shares: Double) -> String? {
+    func buy(code: String, name: String, price: Double,
+             shares: Double, leverage: Double = 1) -> String? {
         guard shares > eps else { return "数量必须大于 0" }
         guard price > 0 else { return "行情未就绪，请稍后重试" }
 
+        let lev = max(1, leverage)
         let amount = price * shares
+        let margin = amount / lev
+
         if !account.mode.isUnlimited {
-            guard amount <= account.cash + 1e-6 else {
-                return "可用资金不足，需要 \(Fmt.money(amount))"
+            guard margin <= account.cash + 1e-6 else {
+                return "可用资金不足，需要 \(Fmt.money(margin))"
             }
         }
-        account.cash -= amount
+
+        // 同一标的只能有一个杠杆倍数，否则成本与强平价会算不清
+        if let idx = account.positions.firstIndex(where: { $0.code == code }) {
+            let old = account.positions[idx]
+            guard abs(old.leverage - lev) < 0.001 else {
+                return "该持仓已是 \(Int(old.leverage))x 杠杆，请先平仓再换杠杆"
+            }
+        }
+
+        account.cash -= margin
 
         if let idx = account.positions.firstIndex(where: { $0.code == code }) {
             let old = account.positions[idx]
@@ -65,10 +108,14 @@ final class AccountStore: ObservableObject {
             account.positions[idx].shares = totalShares
             account.positions[idx].costPrice = totalCost / totalShares
         } else {
-            account.positions.append(Position(code: code, name: name, shares: shares, costPrice: price))
+            account.positions.append(
+                Position(code: code, name: name, shares: shares, costPrice: price, leverage: lev)
+            )
         }
 
         pushRecord(code: code, name: name, side: .buy, price: price, shares: shares)
+        AchievementCenter.shared.recordBuy(code: code, amount: amount, leverage: lev)
+        Juice.trade()
         return nil
     }
 
@@ -77,7 +124,7 @@ final class AccountStore: ObservableObject {
         guard shares > eps else { return "数量必须大于 0" }
         guard price > 0 else { return "行情未就绪，请稍后重试" }
         guard let idx = account.positions.firstIndex(where: { $0.code == code }) else {
-            return "没有该股票的持仓"
+            return "没有该标的的持仓"
         }
 
         let pos = account.positions[idx]
@@ -85,8 +132,11 @@ final class AccountStore: ObservableObject {
             return "持仓不足，最多可卖 \(Fmt.qty(pos.shares, code: code))"
         }
 
-        let amount = price * shares
-        account.cash += amount
+        let ratio = shares / pos.shares
+        let marginPortion = pos.capitalUsed * ratio
+        let pnl = (price - pos.costPrice) * shares
+        // 杠杆仓位理论上可能亏穿本金，回收金额不为负
+        account.cash += max(0, marginPortion + pnl)
 
         let remain = pos.shares - shares
         if remain <= eps {
@@ -96,7 +146,54 @@ final class AccountStore: ObservableObject {
         }
 
         pushRecord(code: code, name: pos.name, side: .sell, price: price, shares: shares)
+        AchievementCenter.shared.recordSell(profit: pnl, profitPercent: pos.profitPercent(price: price))
+        Juice.trade()
         return nil
+    }
+
+    // MARK: - 杠杆强平
+
+    /// 检查所有杠杆仓位，触及强平价的一律平掉。返回被强平的名称
+    @discardableResult
+    func checkLiquidations(prices: [String: Double]) -> [String] {
+        var closed: [String] = []
+        for pos in account.positions where pos.isLeveraged {
+            guard let p = prices[pos.code], p > 0, pos.isLiquidated(price: p) else { continue }
+            let recovered = max(0, pos.equity(price: p))
+            let pnl = pos.profit(price: p)
+            account.cash += recovered
+            pushRecord(code: pos.code, name: pos.name, side: .sell, price: p, shares: pos.shares)
+            account.positions.removeAll { $0.code == pos.code }
+            closed.append(pos.name)
+            AchievementCenter.shared.recordLiquidation()
+            AchievementCenter.shared.recordSell(profit: pnl, profitPercent: -100)
+        }
+        if !closed.isEmpty {
+            liquidationNotice = "💥 \(closed.joined(separator: "、")) 触发强平，仓位归零"
+            Juice.liquidation()
+        }
+        return closed
+    }
+
+    // MARK: - 成就与爽感
+
+    /// 每次行情刷新后调用：算总资产、判定成就、触发爽感反馈
+    func evaluateAchievements(prices: [String: Double], previousTotal: Double?) {
+        let total = account.totalAssets(prices: prices)
+        AchievementCenter.shared.evaluateSnapshot(account: account, totalAssets: total, prices: prices)
+
+        let base = account.mode.initialCapital
+        guard base > 0, let prev = previousTotal, abs(total - prev) > base * 0.001 else { return }
+        let ratio = (total - prev) / base
+        if ratio > 0 { Juice.profit(ratio: ratio) }
+        else if ratio < 0 { Juice.loss(ratio: ratio) }
+    }
+
+    /// 事件与快捷操作用的可支配金额
+    func budget(ratio: Double) -> Double {
+        account.mode.isUnlimited
+            ? account.mode.notionalPerAllIn * ratio
+            : account.cash * ratio
     }
 
     private func pushRecord(code: String, name: String, side: TradeSide, price: Double, shares: Double) {

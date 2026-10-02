@@ -5,7 +5,20 @@ struct DetailView: View {
     @StateObject private var vm: DetailViewModel
     @EnvironmentObject private var store: AccountStore
     @EnvironmentObject private var market: MarketViewModel
-    @State private var tradeSide: TradeSide?
+    @State private var sheet: ActiveSheet?
+
+    /// 同一个视图上挂两个 `.sheet` 在 iOS 上不可靠，统一用一个枚举驱动
+    enum ActiveSheet: Identifiable {
+        case trade(TradeSide)
+        case orders
+
+        var id: String {
+            switch self {
+            case .trade(let s): return "trade-\(s.rawValue)"
+            case .orders: return "orders"
+            }
+        }
+    }
 
     init(code: String, seed: Quote? = nil) {
         _vm = StateObject(wrappedValue: DetailViewModel(code: code, seed: seed))
@@ -15,6 +28,7 @@ struct DetailView: View {
         ScrollView {
             VStack(spacing: 14) {
                 headerCard
+                closedCard
                 chartCard
                 if let pos = store.account.position(for: vm.code) {
                     positionCard(pos)
@@ -28,36 +42,63 @@ struct DetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    if market.isWatched(vm.code) {
-                        market.remove(vm.code)
-                    } else {
-                        market.add(vm.code)
+                Menu {
+                    Button {
+                        if market.isWatched(vm.code) {
+                            market.remove(vm.code)
+                        } else {
+                            market.add(vm.code)
+                        }
+                    } label: {
+                        Label(market.isWatched(vm.code) ? "移出自选" : "加入自选",
+                              systemImage: market.isWatched(vm.code) ? "star.slash" : "star")
+                    }
+
+                    Button {
+                        sheet = .orders
+                    } label: {
+                        Label("我的挂单", systemImage: "clock.arrow.circlepath")
                     }
                 } label: {
                     Image(systemName: market.isWatched(vm.code) ? "star.fill" : "star")
+                        .foregroundStyle(market.isWatched(vm.code) ? Color.yellow : Color.secondary)
                 }
-                .tint(market.isWatched(vm.code) ? Color.yellow : Color.secondary)
-                .accessibilityLabel(market.isWatched(vm.code) ? "移出自选" : "加入自选")
+                .accessibilityLabel("更多")
             }
         }
         .task {
             await vm.load()
             // 停在详情页时也保持报价新鲜
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(vm.pollInterval * 1_000_000_000))
                 if Task.isCancelled { break }
                 await vm.refreshQuote()
             }
         }
         .safeAreaInset(edge: .bottom) { bottomBar }
-        .sheet(item: $tradeSide) { side in
-            TradeSheetView(
-                code: vm.code,
-                name: vm.quote?.name ?? vm.code,
-                price: vm.quote?.price ?? 0,
-                side: side
-            )
+        .sheet(item: $sheet) { item in
+            switch item {
+            case .trade(let side):
+                TradeSheetView(
+                    code: vm.code,
+                    name: vm.quote?.name ?? vm.code,
+                    price: vm.quote?.price ?? 0,
+                    side: side
+                )
+            case .orders:
+                NavigationStack { PendingOrdersView() }
+            }
+        }
+    }
+
+    // MARK: - 休市卡（NPC 作息 + 倒计时 + 预埋单入口）
+
+    @ViewBuilder
+    private var closedCard: some View {
+        if !vm.isGame, !Market(code: vm.code).is24x7 {
+            MarketClosedCard(market: Market(code: vm.code), quoteTime: vm.quote?.time) {
+                sheet = .orders
+            }
         }
     }
 
@@ -66,6 +107,16 @@ struct DetailView: View {
     private var headerCard: some View {
         VStack(spacing: 14) {
             if let q = vm.quote {
+                HStack(spacing: 6) {
+                    badge(Market(code: vm.code).displayName, color: .secondary)
+                    if vm.isGame {
+                        badge("游戏模式 · 本地模拟", color: Color(red: 0.66, green: 0.33, blue: 0.97))
+                    } else if Market(code: vm.code).is24x7 {
+                        badge("24 小时交易", color: .upRed)
+                    }
+                    Spacer()
+                }
+
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(q.priceLabel)
                         .font(.system(size: 40, weight: .heavy, design: .rounded))
@@ -126,17 +177,51 @@ struct DetailView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private func badge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.16))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+
     // MARK: - 走势卡
 
     private var chartCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("近 60 日走势")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            TrendChartView(klines: vm.klines, code: vm.code)
+            HStack {
+                Text(vm.isGame ? "本地模拟走势" : "近 60 日走势")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if !vm.markers.isEmpty {
+                    HStack(spacing: 8) {
+                        legend("B", color: .upRed)
+                        legend("S", color: .downGreen)
+                    }
+                }
+            }
+            TrendChartView(klines: vm.klines, code: vm.code, markers: vm.markers)
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.05)))
+    }
+
+    private func legend(_ text: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text(text)
+                .font(.system(size: 8, weight: .black))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(color)
+                .clipShape(Capsule())
+            Text(text == "B" ? "买入点" : "卖出点")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - 持仓卡
@@ -146,15 +231,38 @@ struct DetailView: View {
         let profit = pos.profit(price: price)
 
         return VStack(alignment: .leading, spacing: 12) {
-            Text("我的持仓")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text("我的持仓")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if pos.isLeveraged {
+                    Text("\(Int(pos.leverage))x 杠杆")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(red: 0.66, green: 0.33, blue: 0.97).opacity(0.2))
+                        .foregroundStyle(Color(red: 0.66, green: 0.33, blue: 0.97))
+                        .clipShape(Capsule())
+                }
+                Spacer()
+            }
 
             HStack(spacing: 0) {
-                infoCell("持有", Fmt.shares(pos.shares))
+                infoCell("持有", Fmt.qty(pos.shares, code: pos.code))
                 infoCell("成本价", Fmt.marketPrice(pos.costPrice, code: pos.code))
                 infoCell("市值", Fmt.compact(pos.marketValue(price: price)))
                 statCell("浮动盈亏", Fmt.signed(profit), color: Color.change(profit))
+            }
+
+            if pos.isLeveraged, let dist = pos.distanceToLiquidationPercent(price: price) {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                    Text("强平价 \(Fmt.marketPrice(pos.liquidationPrice, code: pos.code)) · 距离 \(Fmt.price(dist))%")
+                        .monospacedDigit()
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(dist < 10 ? Color.upRed : Color.orange)
             }
         }
         .padding(16)
@@ -192,7 +300,7 @@ struct DetailView: View {
 
         return HStack(spacing: 12) {
             Button {
-                tradeSide = .buy
+                sheet = .trade(.buy)
             } label: {
                 Text("买入")
                     .font(.headline)
@@ -204,7 +312,7 @@ struct DetailView: View {
             }
 
             Button {
-                tradeSide = .sell
+                sheet = .trade(.sell)
             } label: {
                 Text("卖出")
                     .font(.headline)
