@@ -4,9 +4,11 @@ import Foundation
 struct KLine: Identifiable {
     let date: String
     let open: Double
-    let close: Double
-    let high: Double
-    let low: Double
+    /// 收 / 高 / 低是 `var`：游戏模式下最后一根日线还在走，
+    /// 每个 tick 都要把它的收盘、最高、最低往上叠
+    var close: Double
+    var high: Double
+    var low: Double
     let volume: Double
 
     var id: String { date }
