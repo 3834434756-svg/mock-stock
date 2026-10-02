@@ -1,0 +1,24 @@
+# XcodeGen 生成，不入库
+*.xcodeproj
+*.xcworkspace
+
+# 构建产物
+build/
+DerivedData/
+*.ipa
+*.xcarchive
+
+# 依赖
+Pods/
+.swiftpm/
+Package.resolved
+
+# 系统
+.DS_Store
+
+# 密钥 —— 绝对不要提交
+*.p12
+*.mobileprovision
+*.cer
+*.key
+.env

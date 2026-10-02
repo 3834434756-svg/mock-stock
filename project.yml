@@ -1,0 +1,55 @@
+# ============================================================================
+# XcodeGen 工程描述文件
+# 沙箱/Linux 无法生成 .xcodeproj，由 CI 里 `xcodegen generate` 现场生成。
+# ============================================================================
+
+name: MockStock
+
+options:
+  bundleIdPrefix: com.mockstock
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    # 统一关闭签名（未签名 IPA 的前提）
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+
+targets:
+  MockStock:
+    type: application
+    platform: iOS
+    sources:
+      - path: MockStock
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mockstock.app
+        PRODUCT_NAME: MockStock
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: MockStock/Info.plist
+      properties:
+        CFBundleDisplayName: 模拟股神
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        ITSAppUsesNonExemptEncryption: false
+
+# XcodeGen 默认不生成 shared scheme，不声明的话 xcodebuild -scheme 会找不到
+schemes:
+  MockStock:
+    build:
+      targets:
+        MockStock: all
+    run:
+      config: Debug
+    archive:
+      config: Release
