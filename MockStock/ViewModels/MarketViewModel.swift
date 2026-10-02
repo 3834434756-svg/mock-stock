@@ -9,6 +9,27 @@ final class MarketViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var lastError: String?
 
+    /// 热门股行情（按 PopularStocks 顺序）
+    @Published var popularQuotes: [Quote] = []
+    /// 榜单原始数据（100 只），排序在客户端做
+    @Published var rankItems: [RankItem] = []
+    @Published var isLoadingRank = false
+
+    enum RankMode: String, CaseIterable, Identifiable {
+        case gainers, losers
+
+        var id: String { rawValue }
+        var title: String { self == .gainers ? "涨幅榜" : "跌幅榜" }
+    }
+
+    /// 按当前榜单模式排好序的列表
+    func ranked(_ mode: RankMode) -> [RankItem] {
+        switch mode {
+        case .gainers: return rankItems.sorted { $0.changePercent > $1.changePercent }
+        case .losers: return rankItems.sorted { $0.changePercent < $1.changePercent }
+        }
+    }
+
     private let api = MarketAPI.shared
     private let watchKey = "mockstock.watchlist.v1"
     private var timer: Timer?
@@ -43,6 +64,24 @@ final class MarketViewModel: ObservableObject {
             lastError = nil
         } catch {
             lastError = "行情获取失败，请检查网络"
+        }
+    }
+
+    /// 拉热门股行情。只在首次进入时拉一次，之后跟随轮询刷新
+    func loadPopular() async {
+        let codes = PopularStocks.allCodes
+        guard let list = try? await api.quotes(codes: codes) else { return }
+        var dict: [String: Quote] = [:]
+        for q in list { dict[q.code] = q }
+        popularQuotes = codes.compactMap { dict[$0] }
+    }
+
+    /// 拉榜单（一次 100 只，客户端再排序）
+    func loadRank() async {
+        isLoadingRank = true
+        defer { isLoadingRank = false }
+        if let list = try? await api.rankList() {
+            rankItems = list
         }
     }
 
@@ -86,6 +125,7 @@ final class MarketViewModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 await self?.load()
+                await self?.loadPopular()
             }
         }
     }

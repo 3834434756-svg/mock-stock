@@ -62,9 +62,14 @@ final class MarketAPI {
             let price = Double(f[3]) ?? 0
             guard price > 0 || (Double(f[4]) ?? 0) > 0 else { continue }
 
+            // A股名称里腾讯会用空格对齐（「五 粮 液」），去掉
+            let name = code.lowercased().hasPrefix("sh") || code.lowercased().hasPrefix("sz")
+                ? f[1].replacingOccurrences(of: " ", with: "")
+                : f[1]
+
             result.append(Quote(
                 code: code,
-                name: f[1],
+                name: name,
                 price: price,
                 prevClose: Double(f[4]) ?? 0,
                 open: Double(f[5]) ?? 0,
@@ -120,29 +125,123 @@ final class MarketAPI {
             throw MarketError.badURL
         }
         let (data, _) = try await session.data(from: url)
-        return Self.parseSearch(GBK.decode(data))
+        return Self.parseSearch(GBK.decode(data), keyword: trimmed)
     }
 
-    /// 解析形如：v_hint="sh~600000~浦发银行~pfyh~GP-A^sz~000001~平安银行~..."
-    static func parseSearch(_ text: String) -> [SearchResult] {
+    /// 解析形如：v_hint="sh~600519~\u8d35\u5dde\u8305\u53f0~gzmt~GP-A^..."
+    ///
+    /// 这里踩过三个坑，都是实测出来的：
+    /// 1. 名字是 `\uXXXX` 字面转义，不是 GBK —— 必须还原，否则界面全是乱码
+    /// 2. A股类型是 `GP-A`，港美股是 `GP`，只匹配 `GP` 会把 A股全滤掉
+    /// 3. 美股代码必须去掉交易所后缀并大写：`aapl.oq` → `usAAPL`
+    ///    （`usAAPL.OQ` 和 `usaapl` 都查不到行情）
+    ///
+    /// 另外杠杆/做空 ETF 混在股票里，删掉太可惜（用户可能真想找 ETF），
+    /// 所以只降权、不剔除。
+    static func parseSearch(_ text: String, keyword: String) -> [SearchResult] {
         guard let eq = text.firstIndex(of: "=") else { return [] }
         var payload = String(text[text.index(after: eq)...])
         payload = payload.trimmingCharacters(in: CharacterSet(charactersIn: "\";\r\n "))
 
-        var seen = Set<String>()
-        var result: [SearchResult] = []
+        let kw = keyword.lowercased()
+        var items: [(result: SearchResult, score: Int)] = []
+
         for item in payload.components(separatedBy: "^") {
             let f = item.components(separatedBy: "~")
-            guard f.count >= 3 else { continue }
+            guard f.count >= 5 else { continue }
+
             let prefix = f[0].lowercased()
             guard ["sh", "sz", "hk", "us"].contains(prefix) else { continue }
-            let name = f[2]
+
+            // GP / GP-A / GP-A-CYB / GP-B 都是股票；ZS 指数；JJ 基金；QZ 权证
+            let type = f[4].uppercased()
+            guard type.hasPrefix("GP") || type.hasPrefix("ZS") || type.hasPrefix("JJ") else { continue }
+
+            let name = UnicodeEscape.decode(f[2]).trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { continue }
-            let code = prefix + f[1]
-            guard !seen.contains(code) else { continue }
-            seen.insert(code)
-            result.append(SearchResult(code: code, name: name))
+            // ADR 与主标的重复
+            guard !name.lowercased().contains("adr") else { continue }
+
+            var num = f[1]
+            if prefix == "us" {
+                if let dot = num.firstIndex(of: ".") { num = String(num[..<dot]) }
+                num = num.uppercased()
+            } else if prefix == "hk", num.hasPrefix("8") {
+                // 港股 8xxxx 是人民币柜台（80700 = 00700），与主标的重复
+                continue
+            }
+            guard !num.isEmpty else { continue }
+
+            let lower = name.lowercased()
+            let leveraged = lower.contains("etf") || lower.contains("做多") || lower.contains("做空")
+            let isStock = type.hasPrefix("GP")
+
+            // 排序打分：完全同名 > 股票前缀匹配 > 股票 > 指数基金 > 杠杆ETF
+            let score: Int
+            if lower == kw {
+                score = 0
+            } else if leveraged {
+                score = 4
+            } else if isStock && lower.hasPrefix(kw) {
+                score = 1
+            } else if isStock {
+                score = 2
+            } else {
+                score = 3
+            }
+
+            items.append((SearchResult(code: prefix + num, name: name), score))
         }
-        return result
+
+        // 按分数排，同分保持接口原有顺序
+        let ordered = items.enumerated().sorted { a, b in
+            if a.element.score != b.element.score { return a.element.score < b.element.score }
+            return a.offset < b.offset
+        }
+
+        // 同名去重（如 腾讯控股 的港股与 OTC 两条）
+        var seen = Set<String>()
+        var out: [SearchResult] = []
+        for e in ordered where !seen.contains(e.element.result.name) {
+            seen.insert(e.element.result.name)
+            out.append(e.element.result)
+        }
+        return out
+    }
+
+    // MARK: - 排行榜
+
+    /// A 股排行榜。
+    ///
+    /// 接口只认 price / turnover / volume 三种排序，拿不到「按涨跌幅排序」，
+    /// 所以按成交额拉 100 只回来，由客户端自己排 —— 效果一样，还少一次请求。
+    func rankList(count: Int = 100) async throws -> [RankItem] {
+        let urlStr = "https://proxy.finance.qq.com/cgi/cgi-bin/rank/hs/getBoardRankList"
+            + "?board_code=aStock&sort_type=turnover&direct=down&offset=0&count=\(count)"
+        guard let url = URL(string: urlStr) else { throw MarketError.badURL }
+        let (data, _) = try await session.data(from: url)
+        return try Self.parseRank(data)
+    }
+
+    static func parseRank(_ data: Data) throws -> [RankItem] {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let d = root["data"] as? [String: Any],
+              let list = d["rank_list"] as? [[String: Any]] else {
+            throw MarketError.decode
+        }
+
+        var out: [RankItem] = []
+        for row in list {
+            guard let code = row["code"] as? String,
+                  let rawName = row["name"] as? String else { continue }
+            out.append(RankItem(
+                code: code,
+                name: rawName.replacingOccurrences(of: " ", with: ""),
+                price: Double("\(row["zxj"] ?? "")") ?? 0,
+                changePercent: Double("\(row["zdf"] ?? "")") ?? 0,
+                turnover: Double("\(row["turnover"] ?? "")") ?? 0
+            ))
+        }
+        return out
     }
 }

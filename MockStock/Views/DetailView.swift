@@ -4,6 +4,7 @@ import SwiftUI
 struct DetailView: View {
     @StateObject private var vm: DetailViewModel
     @EnvironmentObject private var store: AccountStore
+    @EnvironmentObject private var market: MarketViewModel
     @State private var tradeSide: TradeSide?
 
     init(code: String, seed: Quote? = nil) {
@@ -25,6 +26,21 @@ struct DetailView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle(vm.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    if market.isWatched(vm.code) {
+                        market.remove(vm.code)
+                    } else {
+                        market.add(vm.code)
+                    }
+                } label: {
+                    Image(systemName: market.isWatched(vm.code) ? "star.fill" : "star")
+                }
+                .tint(market.isWatched(vm.code) ? Color.yellow : Color.secondary)
+                .accessibilityLabel(market.isWatched(vm.code) ? "移出自选" : "加入自选")
+            }
+        }
         .task { await vm.load() }
         .safeAreaInset(edge: .bottom) { bottomBar }
         .sheet(item: $tradeSide) { side in
