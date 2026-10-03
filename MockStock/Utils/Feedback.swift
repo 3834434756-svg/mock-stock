@@ -25,7 +25,7 @@ enum Juice {
         SoundKit.shared.tick()
     }
 
-    /// 浮盈变化。`ratio` 是盈亏相对初始资金的比例
+    /// 浮盈变化。`ratio` 是总资产相对上一次的变化比例（0.05 = 涨 5%）
     static func profit(ratio: Double) {
         if ratio >= 0.5 {
             Haptic.success()
@@ -37,12 +37,15 @@ enum Juice {
         }
     }
 
-    /// 浮亏变化
+    /// 浮亏变化。`ratio` 是总资产相对上一次的变化比例（-0.05 = 跌 5%）
+    ///
+    /// 这里**不打爆仓特效**。资产回撤和「仓位被强平」是两回事，
+    /// 混在一起会让用户以为自己的仓位没了 —— 真爆仓走 `liquidation()`。
     static func loss(ratio: Double) {
         if ratio <= -0.5 {
             Haptic.error()
             SoundKit.shared.liquidation()
-            JuiceCenter.shared.fire(.liquidation)
+            JuiceCenter.shared.fire(.crash)
         } else if ratio <= -0.05 {
             Haptic.warning()
             SoundKit.shared.loss()
@@ -56,11 +59,11 @@ enum Juice {
         JuiceCenter.shared.fire(.achievement)
     }
 
-    /// 爆仓
-    static func liquidation() {
+    /// 爆仓。只有**仓位真的被强制平掉**时才调用
+    static func liquidation(detail: String? = nil) {
         Haptic.error()
         SoundKit.shared.liquidation()
-        JuiceCenter.shared.fire(.liquidation)
+        JuiceCenter.shared.fire(.liquidation, caption: detail)
     }
 
     /// 突发事件

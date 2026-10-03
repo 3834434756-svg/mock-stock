@@ -19,6 +19,9 @@ final class MarketViewModel: ObservableObject {
 
     /// 上一次的总资产，用于触发盈亏爽感反馈
     private var lastTotal: Double?
+    /// 上一次的世界与模式。切换后要重置 `lastTotal`，避免跨局比较
+    private var lastWorld: TradingWorld?
+    private var lastMode: GameMode?
 
     enum RankMode: String, CaseIterable, Identifiable {
         case gainers, losers
@@ -74,7 +77,11 @@ final class MarketViewModel: ObservableObject {
         for (k, v) in quotes { d[k] = v.price }
         for q in cryptoQuotes { d[q.code] = q.price }
         for q in popularQuotes { d[q.code] = q.price }
-        for (k, v) in GameEngine.shared.sims { d[k] = v.price }
+        // 只有游戏世界才认本地模拟价。现实盘下若残留 sims，
+        // 用模拟价去判定强平会凭空打出爆仓
+        if isGame {
+            for (k, v) in GameEngine.shared.sims { d[k] = v.price }
+        }
         return d
     }
 
@@ -150,14 +157,26 @@ final class MarketViewModel: ObservableObject {
         OrderCenter.shared.process(prices: prices, freshCodes: fresh)
 
         let store = AccountStore.shared
+
+        // 换世界 / 重开一局后总资产会整体换口径，旧的基准必须丢掉，
+        // 否则第一次刷新会被算成"暴涨"或"暴跌"，直接甩一个特效出来
+        if lastWorld != store.account.world || lastMode != store.account.mode {
+            lastWorld = store.account.world
+            lastMode = store.account.mode
+            lastTotal = nil
+        }
+
         store.checkLiquidations(prices: prices)
 
         let total = store.account.totalAssets(prices: prices)
-        if let prev = lastTotal {
-            let base = store.account.mode.initialCapital
-            if base > 0, abs(total - prev) > base * 0.01 {
-                let ratio = (total - prev) / base
-                if ratio > 0 { Juice.profit(ratio: ratio) } else { Juice.loss(ratio: ratio) }
+        // 反馈强度按「相对上一次总资产」的变化算。
+        // 之前用「相对初始资金」算，杠杆建仓/平仓会让总资产在两种口径间跳一下，
+        // 于是卖出一笔就被判成巨亏、直接播爆仓特效。
+        // 阈值跟 `Juice` 内部的档位对齐，低于 5% 不打扰用户。
+        if let prev = lastTotal, prev > 0 {
+            let delta = (total - prev) / prev
+            if abs(delta) >= 0.05 {
+                if delta > 0 { Juice.profit(ratio: delta) } else { Juice.loss(ratio: delta) }
             }
         }
         lastTotal = total

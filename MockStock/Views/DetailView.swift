@@ -250,8 +250,18 @@ struct DetailView: View {
             HStack(spacing: 0) {
                 infoCell("持有", Fmt.qty(pos.shares, code: pos.code))
                 infoCell("成本价", Fmt.marketPrice(pos.costPrice, code: pos.code))
-                infoCell("市值", Fmt.compact(pos.marketValue(price: price)))
+                // 杠杆仓位显示净值（保证金 + 浮盈），无杠杆时净值就等于市值
+                infoCell(pos.isLeveraged ? "净值" : "市值",
+                         Fmt.compact(pos.netValue(price: price)))
                 statCell("浮动盈亏", Fmt.signed(profit), color: Color.change(profit))
+            }
+
+            if pos.isLeveraged {
+                HStack(spacing: 0) {
+                    infoCell("占用保证金", Fmt.compact(pos.capitalUsed))
+                    infoCell("名义规模", Fmt.compact(pos.marketValue(price: price)))
+                    Spacer(minLength: 0)
+                }
             }
 
             if pos.isLeveraged, let dist = pos.distanceToLiquidationPercent(price: price) {

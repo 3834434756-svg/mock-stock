@@ -92,7 +92,7 @@ struct PortfolioView: View {
 
             HStack(spacing: 0) {
                 statBlock("可用资金", unlimited ? "∞" : Fmt.compact(store.account.cash))
-                statBlock("持仓市值", Fmt.compact(store.account.positionsValue(quotes: quotes)))
+                statBlock("持仓净值", Fmt.compact(store.account.positionsValue(quotes: quotes)))
                 statBlock("总收益", unlimited ? "—" : Fmt.percent(ret), color: Color.change(ret))
             }
 
@@ -136,6 +136,15 @@ struct PortfolioView: View {
                 Text(pos.displayCode)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
+                if pos.isLeveraged {
+                    Text("\(Int(pos.leverage))x")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color(red: 0.66, green: 0.33, blue: 0.97).opacity(0.2))
+                        .foregroundStyle(Color(red: 0.66, green: 0.33, blue: 0.97))
+                        .clipShape(Capsule())
+                }
                 Spacer()
                 Text(Fmt.signed(profit))
                     .font(.system(size: 16, weight: .bold, design: .rounded))

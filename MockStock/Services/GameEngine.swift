@@ -13,7 +13,7 @@ final class GameEngine: ObservableObject {
     static let shared = GameEngine()
 
     /// 单个标的的模拟状态
-    struct Sim {
+    struct Sim: Codable {
         let code: String
         var name: String
         /// 真实收盘价（种子）。价格会围绕它做轻微均值回归，避免飘到离谱
@@ -44,6 +44,12 @@ final class GameEngine: ObservableObject {
     /// 每个标的见过的最低涨跌幅，用于「力挽狂澜」判定
     private(set) var lowestChange: [String: Double] = [:]
 
+    /// 当前持仓的成本价快照，由 `AccountStore` 在每次交易后推过来。
+    ///
+    /// 引擎**刻意不反向引用** `AccountStore.shared` —— 账户的 `init()` 里会启动引擎，
+    /// 若此时引擎再去读账户单例，就会撞上 `static let` 的初始化递归。
+    private(set) var heldCosts: [String: Double] = [:]
+
     /// 游戏内 1 天 = 现实多少秒
     let dayLength: TimeInterval = 300
     /// tick 间隔（秒）
@@ -56,11 +62,28 @@ final class GameEngine: ObservableObject {
 
     private var timer: Timer?
     private var lastTick = Date()
+    private var lastPersist = Date()
     private var rng = SystemRandomNumberGenerator()
+
+    /// 模拟状态存档 key
+    private let simsKey = "mockstock.engine.sims.v1"
+
+    /// 落盘的模拟状态。
+    /// 只存**持仓标的** —— 榜单里那 100 只没人关心，全存会把 UserDefaults 撑爆。
+    private struct Snapshot: Codable {
+        var sims: [String: Sim]
+        var elapsed: Double
+        var dayIndex: Int
+    }
 
     private init() {}
 
     // MARK: - 生命周期
+
+    /// 同步持仓快照。`AccountStore` 每次买入 / 卖出 / 强平 / 重开一局后调用
+    func syncHeld(_ costs: [String: Double]) {
+        heldCosts = costs
+    }
 
     /// 用真实行情做种子。已在跑的标的保留当前价，只补新标的
     func seed(_ quotes: [Quote]) {
@@ -69,21 +92,27 @@ final class GameEngine: ObservableObject {
                 s.name = q.name
                 sims[q.code] = s
             } else {
+                // 如果这个标的正被持有（比如刚重启、存档还没落盘），
+                // 就用**持仓成本价**起手。直接拿真实价种入会造成价格跳变，
+                // 高杠杆仓位会被瞬间打到强平价 —— 看着就像"什么都没干就爆仓了"
+                let held = heldCosts[q.code]
+                let seedPrice = held ?? q.price
+                let prevClose = held ?? (q.prevClose > 0 ? q.prevClose : q.price)
                 let vol = Self.volatility(for: Market(code: q.code))
                 sims[q.code] = Sim(
                     code: q.code,
                     name: q.name,
-                    base: q.price,
-                    price: q.price,
-                    prevClose: q.prevClose > 0 ? q.prevClose : q.price,
-                    open: q.price,
-                    high: q.price,
-                    low: q.price,
+                    base: seedPrice,
+                    price: seedPrice,
+                    prevClose: prevClose,
+                    open: seedPrice,
+                    high: seedPrice,
+                    low: seedPrice,
                     volatility: vol,
                     drift: 0,
                     volume: 0
                 )
-                bars[q.code] = [Self.newBar(date: Date(), price: q.price)]
+                bars[q.code] = [Self.newBar(date: Date(), price: seedPrice)]
                 lowestChange[q.code] = 0
             }
         }
@@ -97,6 +126,7 @@ final class GameEngine: ObservableObject {
 
     func start() {
         guard !isRunning else { return }
+        restore()
         isRunning = true
         lastTick = Date()
         restartTimer()
@@ -106,18 +136,23 @@ final class GameEngine: ObservableObject {
         isRunning = false
         timer?.invalidate()
         timer = nil
+        persist()
     }
 
     /// 重开一局
     func reset() {
-        stop()
+        isRunning = false
+        timer?.invalidate()
+        timer = nil
         sims = [:]
         bars = [:]
         realKlines = [:]
         lowestChange = [:]
+        heldCosts = [:]
         elapsed = 0
         dayIndex = 0
         lastTick = Date()
+        UserDefaults.standard.removeObject(forKey: simsKey)
     }
 
     private func restartTimer() {
@@ -160,6 +195,52 @@ final class GameEngine: ObservableObject {
             lowestChange[code] = min(lowestChange[code] ?? 0, pct)
             updateCurrentBar(s)
         }
+
+        // 定期落盘。不存的话重启后持仓标的会被真实价重新种入，
+        // 价格一跳变，高杠杆仓位就凭空爆了
+        if now.timeIntervalSince(lastPersist) > 5 {
+            lastPersist = now
+            persist()
+        }
+    }
+
+    // MARK: - 存档
+
+    /// 把持仓标的的模拟价写进 UserDefaults，让重启后价格能接上
+    private func persist() {
+        let held = Set(heldCosts.keys)
+        guard !held.isEmpty else {
+            UserDefaults.standard.removeObject(forKey: simsKey)
+            return
+        }
+        let snapshot = Snapshot(sims: sims.filter { held.contains($0.key) },
+                                elapsed: elapsed,
+                                dayIndex: dayIndex)
+        if let d = try? JSONEncoder().encode(snapshot) {
+            UserDefaults.standard.set(d, forKey: simsKey)
+        }
+    }
+
+    /// 恢复存档。冷启动时在 `start()` 里调用
+    private func restore() {
+        guard sims.isEmpty,
+              let d = UserDefaults.standard.data(forKey: simsKey),
+              let snap = try? JSONDecoder().decode(Snapshot.self, from: d) else { return }
+
+        // 存档里的标的可能已经不在持仓里了（卖了又重启），过滤一遍
+        let held = Set(heldCosts.keys)
+        let kept = snap.sims.filter { held.contains($0.key) }
+        guard !kept.isEmpty else { return }
+
+        sims = kept
+        elapsed = snap.elapsed
+        dayIndex = snap.dayIndex
+        for (code, s) in kept {
+            bars[code] = [Self.newBar(date: Date(), price: s.price)]
+            lowestChange[code] = 0
+        }
+        lastTick = Date()
+        lastPersist = Date()
     }
 
     private func updateCurrentBar(_ s: Sim) {

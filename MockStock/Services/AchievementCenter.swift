@@ -146,10 +146,13 @@ final class AchievementCenter: ObservableObject {
 
         for pos in account.positions {
             let price = prices[pos.code] ?? pos.costPrice
+            // 判定「重仓」要用净值口径。杠杆仓位的名义市值可能是自有资金的 10 倍，
+            // 用 marketValue 去比 totalAssets 会把「全仓」成就白送出去
+            let net = pos.netValue(price: price)
             let mv = pos.marketValue(price: price)
             let pct = pos.profitPercent(price: price)
             if pct >= 1000 { unlock("ten_bagger") }
-            if totalAssets > 0, mv >= totalAssets * 0.95 { unlock("all_in") }
+            if totalAssets > 0, net >= totalAssets * 0.95 { unlock("all_in") }
             if pos.code.uppercased().contains("TSLA"), mv >= 10_000_000_000 {
                 unlock("tesla_private")
             }
@@ -158,7 +161,7 @@ final class AchievementCenter: ObservableObject {
                low <= -50,
                let sim = GameEngine.shared.sims[pos.code],
                sim.changePercent >= 10,
-               totalAssets > 0, mv >= totalAssets * 0.5 {
+               totalAssets > 0, net >= totalAssets * 0.5 {
                 unlock("saved_the_day")
             }
         }

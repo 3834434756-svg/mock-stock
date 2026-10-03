@@ -61,6 +61,15 @@ struct Position: Identifiable, Codable, Equatable {
     /// 当前净值（占用资金 + 浮盈）
     func equity(price: Double) -> Double { capitalUsed + profit(price: price) }
 
+    /// 计入总资产时用的净值。
+    ///
+    /// **杠杆仓位不能按 `marketValue` 计** —— 那样 10x 杠杆买入 1 万会显示成 10 万资产，
+    /// 平仓时总资产又"跌"回 1 万，会被爽感层误判成爆仓。
+    /// 无杠杆时 `capitalUsed == cost`，结果与市值一致，所以对现实虚拟盘零影响。
+    ///
+    /// 亏穿保证金时净值会为负（强平前的一瞬间），对外一律按 0 计。
+    func netValue(price: Double) -> Double { max(0, equity(price: price)) }
+
     /// 强平价。价格跌到这里，本金亏光，强制平仓
     var liquidationPrice: Double {
         guard isLeveraged else { return 0 }

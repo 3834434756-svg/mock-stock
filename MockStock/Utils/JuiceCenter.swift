@@ -9,20 +9,29 @@ final class JuiceCenter: ObservableObject {
     static let shared = JuiceCenter()
 
     @Published var effect: JuiceEffect?
+    /// 特效附带的一行说明，目前只有爆仓用得上（「XXX 已强制平仓」）
+    @Published var caption: String?
 
     /// 特效展示时长
     private let duration: TimeInterval = 1.7
 
     private init() {}
 
-    func fire(_ e: JuiceEffect) {
+    func fire(_ e: JuiceEffect, caption: String? = nil) {
         effect = e
+        self.caption = caption
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             // 期间如果又触发了新的特效，不要把它清掉
-            if effect == e { effect = nil }
+            if effect == e {
+                effect = nil
+                self.caption = nil
+            }
         }
     }
 
-    func clear() { effect = nil }
+    func clear() {
+        effect = nil
+        caption = nil
+    }
 }

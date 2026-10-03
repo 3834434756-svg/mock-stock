@@ -20,8 +20,8 @@ struct MockStockApp: App {
             .environmentObject(store)
             .environmentObject(market)
             .preferredColorScheme(.dark)
-            // 全屏爽感特效（金币雨 / 爆仓红闪 / 成就金光）
-            .overlay(JuiceOverlay(effect: juice.effect))
+            // 全屏爽感特效（金币雨 / 资产回撤 / 爆仓红闪 / 成就金光）
+            .overlay(JuiceOverlay(effect: juice.effect, caption: juice.caption))
             // 成就解锁横幅
             .overlay(alignment: .top) {
                 if let a = achievements.toast {

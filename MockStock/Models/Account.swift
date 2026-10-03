@@ -44,21 +44,25 @@ struct Account: Codable {
         positions.first { $0.code == code }
     }
 
-    /// 持仓市值合计
+    /// 持仓净值合计。
+    ///
+    /// 注意用的是 `netValue` 而不是 `marketValue`：杠杆仓位只投入了保证金，
+    /// 按全额市值计会让总资产虚增（10x 杠杆直接翻 10 倍），
+    /// 平仓时又会"暴跌"回去，触发爆仓特效。无杠杆时两者相等。
     func positionsValue(quotes: [String: Quote]) -> Double {
         positions.reduce(0) { sum, pos in
-            sum + pos.marketValue(price: quotes[pos.code]?.price ?? pos.costPrice)
+            sum + pos.netValue(price: quotes[pos.code]?.price ?? pos.costPrice)
         }
     }
 
-    /// 持仓市值合计（按纯价格表算，供游戏模式与成就判定使用）
+    /// 持仓净值合计（按纯价格表算，供游戏模式与成就判定使用）
     func positionsValue(prices: [String: Double]) -> Double {
         positions.reduce(0) { sum, pos in
-            sum + pos.marketValue(price: prices[pos.code] ?? pos.costPrice)
+            sum + pos.netValue(price: prices[pos.code] ?? pos.costPrice)
         }
     }
 
-    /// 总资产 = 可用资金 + 持仓市值
+    /// 总资产 = 可用资金 + 持仓净值
     func totalAssets(quotes: [String: Quote]) -> Double {
         cash + positionsValue(quotes: quotes)
     }

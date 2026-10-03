@@ -7,16 +7,18 @@ final class AccountStore: ObservableObject {
     static let shared = AccountStore()
 
     @Published var account: Account {
-        didSet { save() }
+        didSet {
+            save()
+            // 持仓一变就同步给行情引擎。引擎靠这份快照在重启后
+            // 用成本价给持仓标的定价，避免价格跳变打爆杠杆仓位
+            GameEngine.shared.syncHeld(heldCostMap)
+        }
     }
 
     /// 是否还没选过模式（首次启动 → 显示模式选择页）
     @Published var needsSetup: Bool {
         didSet { save() }
     }
-
-    /// 最近一次爆仓提示，展示完清空
-    @Published var liquidationNotice: String?
 
     private let accountKey = "mockstock.account.v2"
     private let setupKey = "mockstock.needsSetup.v2"
@@ -34,9 +36,18 @@ final class AccountStore: ObservableObject {
         // 冷启动时如果是游戏模式，引擎和事件中心要重新跑起来
         // （Timer 不会跨进程存活，重启后必须显式 start）
         if !needsSetup, account.world == .game {
+            // init 里的赋值不会触发 didSet，这里手动推一次持仓快照
+            GameEngine.shared.syncHeld(heldCostMap)
             GameEngine.shared.start()
             EventCenter.shared.start()
         }
+    }
+
+    /// 持仓成本价快照。推给游戏引擎，供重启后给持仓标的定价
+    private var heldCostMap: [String: Double] {
+        var m: [String: Double] = [:]
+        for p in account.positions { m[p.code] = p.costPrice }
+        return m
     }
 
     // MARK: - 世界 / 模式
@@ -169,25 +180,16 @@ final class AccountStore: ObservableObject {
             AchievementCenter.shared.recordSell(profit: pnl, profitPercent: -100)
         }
         if !closed.isEmpty {
-            liquidationNotice = "💥 \(closed.joined(separator: "、")) 触发强平，仓位归零"
-            Juice.liquidation()
+            Juice.liquidation(detail: "\(closed.joined(separator: "、")) 已强制平仓")
         }
         return closed
     }
 
     // MARK: - 成就与爽感
-
-    /// 每次行情刷新后调用：算总资产、判定成就、触发爽感反馈
-    func evaluateAchievements(prices: [String: Double], previousTotal: Double?) {
-        let total = account.totalAssets(prices: prices)
-        AchievementCenter.shared.evaluateSnapshot(account: account, totalAssets: total, prices: prices)
-
-        let base = account.mode.initialCapital
-        guard base > 0, let prev = previousTotal, abs(total - prev) > base * 0.001 else { return }
-        let ratio = (total - prev) / base
-        if ratio > 0 { Juice.profit(ratio: ratio) }
-        else if ratio < 0 { Juice.loss(ratio: ratio) }
-    }
+    //
+    // 说明：成就判定与爽感反馈的唯一入口在 `MarketViewModel.afterRefresh()`
+    // 与 `PortfolioViewModel.refresh()`（都要触发，否则只在行情页才生效）。
+    // 这里不再放第二份实现 —— 两份逻辑曾经因为资产口径不一致而互相打架。
 
     /// 事件与快捷操作用的可支配金额
     func budget(ratio: Double) -> Double {

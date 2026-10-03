@@ -3,6 +3,7 @@ import SwiftUI
 /// 爽感特效类型
 enum JuiceEffect: Equatable {
     case jackpot        // 暴富：金币雨
+    case crash          // 重挫：资产大幅回撤（还没到爆仓）
     case liquidation    // 爆仓：红闪
     case achievement    // 成就：金光
 }
@@ -10,6 +11,8 @@ enum JuiceEffect: Equatable {
 /// 全屏特效层。放在根视图上，任何地方都能触发。
 struct JuiceOverlay: View {
     let effect: JuiceEffect?
+    /// 附带说明，目前只有爆仓用得上
+    var caption: String? = nil
 
     @State private var progress: Double = 0
 
@@ -19,6 +22,8 @@ struct JuiceOverlay: View {
                 switch effect {
                 case .liquidation:
                     liquidation(geo)
+                case .crash:
+                    crash(geo)
                 case .jackpot:
                     jackpot(geo)
                 case .achievement:
@@ -70,6 +75,31 @@ struct JuiceOverlay: View {
             .scaleEffect(0.8 + 0.5 * p)
     }
 
+    // MARK: - 重挫
+    //
+    // 跟爆仓区分开：资产回撤不等于仓位被强平。
+    // 之前「卖出杠杆仓位」被误判成爆仓，屏幕上直接打「爆仓」两个字，很吓人。
+
+    private func crash(_ geo: GeometryProxy) -> some View {
+        ZStack {
+            Color.red
+                .opacity(progress < 0.15 ? 0.16 : 0.03)
+            HStack(spacing: 7) {
+                Image(systemName: "arrow.down.right")
+                    .font(.system(size: 17, weight: .black))
+                Text("资产回撤")
+                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+            }
+            .foregroundStyle(Color.downGreen)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(Capsule().fill(.ultraThinMaterial))
+            .scaleEffect(1 + 0.08 * progress)
+            .opacity(progress < 0.7 ? 1 : max(0, (1 - progress) / 0.3))
+            .position(x: geo.size.width / 2, y: geo.size.height * 0.42)
+        }
+    }
+
     // MARK: - 爆仓
 
     private func liquidation(_ geo: GeometryProxy) -> some View {
@@ -84,7 +114,7 @@ struct JuiceOverlay: View {
                     .font(.system(size: 40))
                 Text("爆仓")
                     .font(.system(size: 42, weight: .black, design: .rounded))
-                Text("仓位已强制平掉")
+                Text(caption ?? "仓位已强制平掉")
                     .font(.system(size: 13, weight: .semibold))
             }
             .foregroundStyle(.white)
@@ -112,10 +142,11 @@ struct JuiceOverlay: View {
 /// 挂到根视图上：`content.juice($effect)`
 struct JuiceModifier: ViewModifier {
     @Binding var effect: JuiceEffect?
+    var caption: String? = nil
 
     func body(content: Content) -> some View {
         content
-            .overlay(JuiceOverlay(effect: effect))
+            .overlay(JuiceOverlay(effect: effect, caption: caption))
             .onChange(of: effect) { newValue in
                 guard newValue != nil else { return }
                 Task { @MainActor in
@@ -127,7 +158,7 @@ struct JuiceModifier: ViewModifier {
 }
 
 extension View {
-    func juice(_ effect: Binding<JuiceEffect?>) -> some View {
-        modifier(JuiceModifier(effect: effect))
+    func juice(_ effect: Binding<JuiceEffect?>, caption: String? = nil) -> some View {
+        modifier(JuiceModifier(effect: effect, caption: caption))
     }
 }
