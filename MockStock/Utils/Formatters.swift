@@ -66,6 +66,23 @@ enum Fmt {
         return symbol + s
     }
 
+    /// USDT 数量，千分位两位小数，如 `1,234.56`
+    static func u(_ v: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        return f.string(from: NSNumber(value: v)) ?? String(format: "%.2f", v)
+    }
+
+    /// 带单位的 USDT，如 `1,234.56 USDT`
+    static func usdt(_ v: Double) -> String { u(v) + " USDT" }
+
+    /// 币数量，如 `0.0153 BTC`
+    static func coin(_ v: Double, _ short: String) -> String {
+        shares(v) + " " + short
+    }
+
     /// 紧凑金额，如 1.23万 / 4.56亿
     static func compact(_ v: Double) -> String {
         let absV = abs(v)

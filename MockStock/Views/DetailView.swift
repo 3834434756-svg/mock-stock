@@ -5,16 +5,22 @@ struct DetailView: View {
     @StateObject private var vm: DetailViewModel
     @EnvironmentObject private var store: AccountStore
     @EnvironmentObject private var market: MarketViewModel
+    @ObservedObject private var crypto = CryptoStore.shared
     @State private var sheet: ActiveSheet?
+
+    /// 加密货币走独立的币账户（USDT 计价），股票走人民币账户
+    private var isCrypto: Bool { Market(code: vm.code) == .crypto }
 
     /// 同一个视图上挂两个 `.sheet` 在 iOS 上不可靠，统一用一个枚举驱动
     enum ActiveSheet: Identifiable {
         case trade(TradeSide)
+        case cryptoTrade(TradeSide)
         case orders
 
         var id: String {
             switch self {
             case .trade(let s): return "trade-\(s.rawValue)"
+            case .cryptoTrade(let s): return "cryptoTrade-\(s.rawValue)"
             case .orders: return "orders"
             }
         }
@@ -30,9 +36,7 @@ struct DetailView: View {
                 headerCard
                 closedCard
                 chartCard
-                if let pos = store.account.position(for: vm.code) {
-                    positionCard(pos)
-                }
+                positionSection
                 disclaimer
             }
             .padding(16)
@@ -83,6 +87,13 @@ struct DetailView: View {
                     code: vm.code,
                     name: vm.quote?.name ?? vm.code,
                     price: vm.quote?.price ?? 0,
+                    side: side
+                )
+            case .cryptoTrade(let side):
+                CryptoTradeSheetView(
+                    code: vm.code,
+                    name: vm.quote?.name ?? CryptoCoin.displayName(vm.code),
+                    short: CryptoCoin.shortName(vm.code),
                     side: side
                 )
             case .orders:
@@ -226,6 +237,54 @@ struct DetailView: View {
 
     // MARK: - 持仓卡
 
+    @ViewBuilder
+    private var positionSection: some View {
+        if isCrypto {
+            if let pos = crypto.account.position(for: vm.code) {
+                cryptoPositionCard(pos)
+            }
+        } else if let pos = store.account.position(for: vm.code) {
+            positionCard(pos)
+        }
+    }
+
+    /// 币币持仓卡。全部按 USDT 计，不再折算人民币
+    private func cryptoPositionCard(_ pos: CryptoPosition) -> some View {
+        let price = crypto.price(of: pos.code)
+        let profit = pos.profit(price: price)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text("我的持仓")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("USDT 计价")
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.downGreen.opacity(0.18))
+                    .foregroundStyle(Color.downGreen)
+                    .clipShape(Capsule())
+                Spacer()
+            }
+
+            HStack(spacing: 0) {
+                infoCell("持有", Fmt.shares(pos.shares) + " " + pos.short)
+                infoCell("成本价", "$" + Fmt.price(pos.costPrice))
+                infoCell("市值", Fmt.u(pos.marketValue(price: price)))
+                statCell("浮动盈亏", Fmt.signed(profit), color: Color.change(profit))
+            }
+
+            HStack(spacing: 0) {
+                infoCell("成本合计", Fmt.u(pos.cost) + " USDT")
+                infoCell("盈亏比例", Fmt.percent(pos.profitPercent(price: price)))
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.05)))
+    }
+
     private func positionCard(_ pos: Position) -> some View {
         let price = vm.quote?.price ?? pos.costPrice
         let profit = pos.profit(price: price)
@@ -306,11 +365,13 @@ struct DetailView: View {
     // MARK: - 底部买卖栏
 
     private var bottomBar: some View {
-        let hasPosition = store.account.position(for: vm.code) != nil
+        let hasPosition = isCrypto
+            ? crypto.account.position(for: vm.code) != nil
+            : store.account.position(for: vm.code) != nil
 
         return HStack(spacing: 12) {
             Button {
-                sheet = .trade(.buy)
+                sheet = isCrypto ? .cryptoTrade(.buy) : .trade(.buy)
             } label: {
                 Text("买入")
                     .font(.headline)
@@ -322,7 +383,7 @@ struct DetailView: View {
             }
 
             Button {
-                sheet = .trade(.sell)
+                sheet = isCrypto ? .cryptoTrade(.sell) : .trade(.sell)
             } label: {
                 Text("卖出")
                     .font(.headline)

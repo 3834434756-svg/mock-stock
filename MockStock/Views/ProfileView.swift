@@ -6,6 +6,7 @@ struct ProfileView: View {
     @ObservedObject private var achievements = AchievementCenter.shared
     @ObservedObject private var orders = OrderCenter.shared
     @ObservedObject private var engine = GameEngine.shared
+    @ObservedObject private var crypto = CryptoStore.shared
 
     @AppStorage("mockstock.sound.on") private var soundOn = true
 
@@ -37,7 +38,8 @@ struct ProfileView: View {
                     store.resetToSetup()
                 }
             } message: {
-                Text("当前持仓、成交记录、成就与挂单将全部清空，并重新选择起始资金。")
+                Text("当前持仓、成交记录、成就、挂单，以及币币账户与任务进度将全部清空，"
+                     + "并重新选择起始资金。")
             }
         }
     }
@@ -142,9 +144,14 @@ struct ProfileView: View {
     // MARK: - 账户
 
     private var accountSection: some View {
-        Section("账户") {
+        Section {
             LabeledContent("成交笔数", value: "\(store.account.records.count)")
             LabeledContent("持仓数量", value: "\(store.account.positions.count)")
+            LabeledContent("币币账户", value: Fmt.usdt(crypto.account.usdt))
+        } header: {
+            Text("账户")
+        } footer: {
+            Text("币币账户与股票账户相互独立，以 USDT 计价，可在「币圈」里交易、入金与提现。")
         }
     }
 

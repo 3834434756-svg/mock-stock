@@ -4,7 +4,6 @@ import SwiftUI
 struct MarketView: View {
     @EnvironmentObject private var market: MarketViewModel
     @State private var sheet: ActiveSheet?
-    @State private var cryptoKeyword = ""
     @State private var tab: MarketTab = .watchlist
 
     /// 同一个视图上挂两个 `.sheet` 在 iOS 上不可靠，统一用一个枚举驱动
@@ -13,11 +12,11 @@ struct MarketView: View {
         var id: String { rawValue }
     }
 
+    /// 加密货币已迁到独立的「币圈」窗口，这里只留股票
     enum MarketTab: String, CaseIterable, Identifiable {
         case watchlist = "自选"
         case gainers = "涨幅榜"
         case losers = "跌幅榜"
-        case crypto = "加密货币"
 
         var id: String { rawValue }
     }
@@ -69,8 +68,6 @@ struct MarketView: View {
                 switch tab {
                 case .gainers, .losers:
                     await market.loadRank()
-                case .crypto:
-                    await market.loadCrypto()
                 case .watchlist:
                     break
                 }
@@ -96,103 +93,7 @@ struct MarketView: View {
             rankContent(mode: .gainers)
         case .losers:
             rankContent(mode: .losers)
-        case .crypto:
-            cryptoContent
         }
-    }
-
-    // MARK: - 加密货币
-
-    private var filteredCrypto: [Quote] {
-        guard !cryptoKeyword.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return market.cryptoQuotes
-        }
-        let allowed = Set(CryptoCoin.search(cryptoKeyword).map(\.code))
-        return market.cryptoQuotes.filter { allowed.contains($0.code) }
-    }
-
-    private var cryptoContent: some View {
-        List {
-            Section {
-                HStack(spacing: 6) {
-                    Image(systemName: "bolt.fill")
-                        .foregroundStyle(Color.upRed)
-                    Text("24 小时交易，没有开盘收盘 —— 随时都能买卖，\(CryptoCoin.all.count) 个币种")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                    TextField("搜索币种（BTC / 以太坊 / SOL…）", text: $cryptoKeyword)
-                        .font(.system(size: 14))
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.characters)
-                    if !cryptoKeyword.isEmpty {
-                        Button {
-                            cryptoKeyword = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            if market.cryptoQuotes.isEmpty {
-                Section {
-                    HStack {
-                        Spacer()
-                        ProgressView("加载中…")
-                        Spacer()
-                    }
-                }
-            } else if filteredCrypto.isEmpty {
-                Section {
-                    Text("没有匹配的币种")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Section("加密货币") {
-                    ForEach(filteredCrypto) { q in
-                        NavigationLink {
-                            DetailView(code: q.code, seed: q)
-                        } label: {
-                            QuoteRowView(quote: q)
-                        }
-                        .swipeActions(edge: .trailing) {
-                            if market.isWatched(q.code) {
-                                Button(role: .destructive) {
-                                    market.remove(q.code)
-                                } label: {
-                                    Label("移除", systemImage: "star.slash")
-                                }
-                            } else {
-                                Button {
-                                    market.add(q.code)
-                                } label: {
-                                    Label("加自选", systemImage: "star")
-                                }
-                                .tint(.upRed)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Section {
-                Text("行情来自\(CryptoAPI.shared.sourceLabel)公开接口，按 1 USDT ≈ \(Fmt.price(FX.usdtToCNY)) 元折算。"
-                     + "虚拟货币交易在中国大陆不受法律保护，本功能仅供学习娱乐，不构成任何投资建议。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .listStyle(.insetGrouped)
-        .refreshable { await market.loadCrypto() }
     }
 
     // MARK: - 自选

@@ -74,11 +74,14 @@ final class AccountStore: ObservableObject {
         save()
     }
 
-    /// 重置账户，回到模式选择
+    /// 重置账户，回到模式选择。
+    /// 币账户虽然独立记账，但同属这个 App 的进度，一并清空
     func resetToSetup() {
         needsSetup = true
         GameEngine.shared.stop()
         EventCenter.shared.stop()
+        CryptoStore.shared.reset()
+        MissionCenter.shared.reset()
     }
 
     // MARK: - 交易

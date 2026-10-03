@@ -9,6 +9,10 @@ struct RootTabView: View {
             MarketView()
                 .tabItem { Label("行情", systemImage: "chart.line.uptrend.xyaxis") }
 
+            // 币圈是独立账户：USDT 计价、独立余额、独立任务与提现
+            CryptoHubView()
+                .tabItem { Label("币圈", systemImage: "bitcoinsign.circle.fill") }
+
             PortfolioView()
                 .tabItem { Label("持仓", systemImage: "briefcase.fill") }
 
