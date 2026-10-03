@@ -110,7 +110,7 @@ struct DetailView: View {
                 HStack(spacing: 6) {
                     badge(Market(code: vm.code).displayName, color: .secondary)
                     if vm.isGame {
-                        badge("游戏模式 · 本地模拟", color: Color(red: 0.66, green: 0.33, blue: 0.97))
+                        badge("本地模拟", color: Color(red: 0.66, green: 0.33, blue: 0.97))
                     } else if Market(code: vm.code).is24x7 {
                         badge("24 小时交易", color: .upRed)
                     }

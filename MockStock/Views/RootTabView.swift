@@ -2,28 +2,20 @@ import SwiftUI
 
 struct RootTabView: View {
     @EnvironmentObject private var market: MarketViewModel
-    @EnvironmentObject private var store: AccountStore
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 游戏模式才有「游戏内时间」这一层概念
-            if store.isGame {
-                GameStatusBar()
-            }
+        TabView {
+            MarketView()
+                .tabItem { Label("行情", systemImage: "chart.line.uptrend.xyaxis") }
 
-            TabView {
-                MarketView()
-                    .tabItem { Label("行情", systemImage: "chart.line.uptrend.xyaxis") }
+            PortfolioView()
+                .tabItem { Label("持仓", systemImage: "briefcase.fill") }
 
-                PortfolioView()
-                    .tabItem { Label("持仓", systemImage: "briefcase.fill") }
-
-                ProfileView()
-                    .tabItem { Label("我的", systemImage: "person.crop.circle") }
-            }
-            .tint(.upRed)
+            ProfileView()
+                .tabItem { Label("我的", systemImage: "person.crop.circle") }
         }
+        .tint(.upRed)
         .task {
             await market.load()
             await market.loadPopular()

@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// 我的：玩法世界 / 成就 / 挂单 / 账户统计 / 设置 / 重置
+/// 我的：账户概览 / 功能入口 / 统计 / 设置 / 重置
 struct ProfileView: View {
     @EnvironmentObject private var store: AccountStore
     @ObservedObject private var achievements = AchievementCenter.shared
     @ObservedObject private var orders = OrderCenter.shared
+    @ObservedObject private var engine = GameEngine.shared
 
     @AppStorage("mockstock.sound.on") private var soundOn = true
 
@@ -21,7 +22,7 @@ struct ProfileView: View {
     var body: some View {
         NavigationStack {
             List {
-                worldSection
+                overviewSection
                 playSection
                 accountSection
                 settingsSection
@@ -36,57 +37,47 @@ struct ProfileView: View {
                     store.resetToSetup()
                 }
             } message: {
-                Text("当前持仓、成交记录、成就与挂单将全部清空，并重新选择玩法世界与起始资金。")
+                Text("当前持仓、成交记录、成就与挂单将全部清空，并重新选择起始资金。")
             }
         }
     }
 
-    // MARK: - 世界
+    // MARK: - 账户概览
 
-    private var worldSection: some View {
+    private var overviewSection: some View {
         Section {
             HStack(spacing: 14) {
                 ZStack {
                     Circle()
-                        .fill(world.accent.opacity(0.18))
+                        .fill(mode.accent.opacity(0.18))
                         .frame(width: 52, height: 52)
-                    Image(systemName: world.symbolName)
+                    Image(systemName: mode.symbolName)
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(world.accent)
+                        .foregroundStyle(mode.accent)
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(world.title)
-                        .font(.system(size: 18, weight: .bold))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("起始资金")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                        Text(mode.capitalText)
+                            .font(.system(size: 19, weight: .heavy, design: .rounded))
+                            .foregroundStyle(mode.accent)
+                            .monospacedDigit()
+                    }
                     Text(world.tagline)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer()
+
+                Spacer(minLength: 0)
             }
             .padding(.vertical, 6)
-
-            HStack(spacing: 10) {
-                Image(systemName: mode.symbolName)
-                    .font(.system(size: 15))
-                    .foregroundStyle(mode.accent)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(mode.title)
-                        .font(.system(size: 15, weight: .semibold))
-                    Text(mode.subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(mode.capitalText)
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
-                    .foregroundStyle(mode.accent)
-                    .monospacedDigit()
-            }
         }
     }
 
-    // MARK: - 玩法入口
+    // MARK: - 功能入口
 
     private var playSection: some View {
         Section {
@@ -134,7 +125,7 @@ struct ProfileView: View {
                             .font(.system(size: 16))
                             .foregroundStyle(Color(red: 0.66, green: 0.33, blue: 0.97))
                             .frame(width: 26)
-                        Text("平行宇宙事件")
+                        Text("突发事件")
                         Spacer()
                         Text("\(EventCenter.shared.log.count) 条")
                             .font(.system(size: 13, weight: .semibold))
@@ -144,7 +135,7 @@ struct ProfileView: View {
                 }
             }
         } header: {
-            Text("玩法")
+            Text("功能")
         }
     }
 
@@ -152,12 +143,8 @@ struct ProfileView: View {
 
     private var accountSection: some View {
         Section("账户") {
-            LabeledContent("初始资金", value: mode.capitalText)
             LabeledContent("成交笔数", value: "\(store.account.records.count)")
             LabeledContent("持仓数量", value: "\(store.account.positions.count)")
-            if store.isGame {
-                LabeledContent("游戏内天数", value: "第 \(GameEngine.shared.dayIndex + 1) 天")
-            }
         }
     }
 
@@ -169,6 +156,18 @@ struct ProfileView: View {
                 Label("音效与震动", systemImage: "speaker.wave.2.fill")
             }
             .tint(.upRed)
+
+            // 本地模拟盘的行情是引擎自己推进的，可以调速；
+            // 真实盘的时间就是真实时间，没有这一项
+            if store.isGame {
+                Picker(selection: $engine.speed) {
+                    Text("1x").tag(1.0)
+                    Text("2x").tag(2.0)
+                    Text("5x").tag(5.0)
+                } label: {
+                    Label("行情推进速度", systemImage: "gauge.with.dots.needle.67percent")
+                }
+            }
         } header: {
             Text("设置")
         } footer: {
@@ -183,16 +182,16 @@ struct ProfileView: View {
             Button(role: .destructive) {
                 showResetAlert = true
             } label: {
-                Text("重置账户 / 更换玩法世界")
+                Text("重置账户")
             }
         }
     }
 
     private var disclaimerSection: some View {
         Section {
-            Text("本 App 为模拟交易学习工具。现实虚拟盘使用公开接口的真实行情，"
-                 + "游戏模式的价格由本地引擎模拟生成；两者均为虚拟撮合，不涉及任何真实资金，"
-                 + "不构成投资建议。")
+            Text("本 App 为模拟交易学习工具。真实行情来自公开接口，"
+                 + "本地模拟盘的价格由本地引擎生成；两者均为虚拟撮合，"
+                 + "不涉及任何真实资金，不构成投资建议。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

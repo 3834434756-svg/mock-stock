@@ -7,12 +7,19 @@ extension GameMode {
         case .fromZero: return Color(red: 0.94, green: 0.63, blue: 0.19)
         case .steady: return Color(red: 0.23, green: 0.51, blue: 0.96)
         case .easy: return .downGreen
+        case .mega: return Color(red: 0.85, green: 0.66, blue: 0.18)
         case .unlimited: return Color(red: 0.66, green: 0.33, blue: 0.97)
         }
     }
 
     var capitalText: String {
-        isUnlimited ? "∞" : Fmt.money(initialCapital)
+        if isUnlimited { return "∞" }
+        // 50 亿这个量级写成「¥50亿」更好读，也不至于把卡片撑破
+        if initialCapital >= 100_000_000 {
+            let yi = initialCapital / 100_000_000
+            return yi == yi.rounded() ? "¥\(Int(yi))亿" : "¥\(String(format: "%.2f", yi))亿"
+        }
+        return Fmt.money(initialCapital)
     }
 }
 

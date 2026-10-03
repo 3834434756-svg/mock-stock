@@ -6,6 +6,7 @@ enum GameMode: String, Codable, CaseIterable, Identifiable {
     case fromZero   // 从零开始
     case steady     // 稳步前进
     case easy       // 简单
+    case mega       // 50 亿
     case unlimited  // 无限资产
 
     var id: String { rawValue }
@@ -16,6 +17,7 @@ enum GameMode: String, Codable, CaseIterable, Identifiable {
         case .fromZero: return "从零开始"
         case .steady: return "稳步前进"
         case .easy: return "简单模式"
+        case .mega: return "50 亿"
         case .unlimited: return "无限资产"
         }
     }
@@ -29,6 +31,7 @@ enum GameMode: String, Codable, CaseIterable, Identifiable {
         case .fromZero: return 10_000
         case .steady: return 100_000
         case .easy: return 1_000_000
+        case .mega: return 5_000_000_000
         case .unlimited: return 10_000_000_000_000   // 10 万亿
         }
     }
@@ -48,6 +51,7 @@ enum GameMode: String, Codable, CaseIterable, Identifiable {
         case .fromZero: return "¥10,000 起步，小资金滚雪球"
         case .steady: return "¥100,000 起步，标准体验"
         case .easy: return "¥1,000,000 起步，容错率高"
+        case .mega: return "¥5,000,000,000 起步，随便买"
         case .unlimited: return "资金无限，随便买，专注练手"
         }
     }
@@ -59,6 +63,7 @@ enum GameMode: String, Codable, CaseIterable, Identifiable {
         case .fromZero: return 4
         case .steady: return 3
         case .easy: return 2
+        case .mega: return 1
         case .unlimited: return 1
         }
     }
@@ -69,6 +74,7 @@ enum GameMode: String, Codable, CaseIterable, Identifiable {
         case .fromZero: return "leaf.fill"
         case .steady: return "chart.bar.fill"
         case .easy: return "dollarsign.circle.fill"
+        case .mega: return "crown.fill"
         case .unlimited: return "infinity"
         }
     }

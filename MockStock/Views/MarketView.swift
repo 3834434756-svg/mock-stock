@@ -213,9 +213,9 @@ struct MarketView: View {
             if market.isGame {
                 Section {
                     HStack(spacing: 6) {
-                        Image(systemName: "gamecontroller.fill")
+                        Image(systemName: "bolt.horizontal.fill")
                             .foregroundStyle(Color(red: 0.66, green: 0.33, blue: 0.97))
-                        Text("游戏模式：价格由本地引擎模拟，永不休市。去「我的」看成就。")
+                        Text("本地模拟盘：价格由本地引擎推进，不受开闭市限制。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
