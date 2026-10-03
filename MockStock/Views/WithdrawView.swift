@@ -263,29 +263,32 @@ struct WithdrawView: View {
     }
 
     /// 解锁引导：告诉用户具体该做什么，而不是只丢一个进度条
+    @ViewBuilder
     private var unlockGuideSection: some View {
-        Section {
-            if account.withdrawable < CryptoStore.minWithdraw {
-                NavigationLink {
-                    DepositView()
-                } label: {
-                    Label("去入金（本金可随时提现）", systemImage: "arrow.down.circle.fill")
-                        .font(.system(size: 14))
+        if account.withdrawable < CryptoStore.minWithdraw || account.lockedReward > 0.01 {
+            Section {
+                if account.withdrawable < CryptoStore.minWithdraw {
+                    NavigationLink {
+                        DepositView()
+                    } label: {
+                        Label("去入金（本金可随时提现）", systemImage: "arrow.down.circle.fill")
+                            .font(.system(size: 14))
+                    }
                 }
-            }
-            if account.lockedReward > 0.01 {
-                NavigationLink {
-                    MissionCenterView()
-                } label: {
-                    Label("去任务中心领更多奖励", systemImage: "gift.fill")
-                        .font(.system(size: 14))
+                if account.lockedReward > 0.01 {
+                    NavigationLink {
+                        MissionCenterView()
+                    } label: {
+                        Label("去任务中心领更多奖励", systemImage: "gift.fill")
+                            .font(.system(size: 14))
+                    }
                 }
+            } header: {
+                Text("如何解锁")
+            } footer: {
+                Text("在「币圈」买入再卖出任意币种都会累计流水，买入和卖出各算一次。"
+                     + "赚到的差价、领到的奖励都留在币账户里，随时可以再来提。")
             }
-        } header: {
-            Text("如何解锁")
-        } footer: {
-            Text("在「币圈」买入再卖出任意币种都会累计流水，买入和卖出各算一次。"
-                 + "赚到的差价、领到的奖励都留在币账户里，随时可以再来提。")
         }
     }
 
