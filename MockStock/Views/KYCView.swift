@@ -148,7 +148,21 @@ struct KYCView: View {
             .disabled(!valid)
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
+        } footer: {
+            // 按钮灰着却不说原因，用户只会以为功能坏了
+            if let reason = blockReason {
+                Text(reason).foregroundStyle(.orange)
+            }
         }
+    }
+
+    /// 表单还差什么
+    private var blockReason: String? {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        if n.count < 2 { return "请填写姓名（至少 2 个字）。" }
+        let id = idNo.trimmingCharacters(in: .whitespaces)
+        if id.count < 15 { return "证件号码至少 15 位，当前 \(id.count) 位。" }
+        return nil
     }
 
     private var noteSection: some View {

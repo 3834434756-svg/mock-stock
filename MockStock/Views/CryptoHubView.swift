@@ -77,7 +77,7 @@ struct CryptoHubView: View {
                 Text("奖励金 \(Fmt.u(account.lockedReward)) USDT 待解锁")
                     .font(.system(size: 11, weight: .semibold))
                 Spacer()
-                Text("还需 \(Fmt.u(account.turnoverToUnlock)) 流水")
+                Text("还需 \(Fmt.u(account.turnoverToUnlock)) 买卖流水")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -86,6 +86,10 @@ struct CryptoHubView: View {
 
             ProgressView(value: account.rewardProgress)
                 .tint(.orange)
+
+            Text("买入再卖出即可累计流水，买卖各算一次。入金的本金不受限制，随时可提。")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
     }
 

@@ -89,7 +89,10 @@ struct MissionCenterView: View {
                             .tint(.orange)
                         Text("奖励金需累计 \(Int(CryptoAccount.rewardMultiple)) 倍流水方可提现 · "
                              + "已解锁 \(Fmt.u(crypto.account.rewardUnlocked)) / "
-                             + "\(Fmt.u(crypto.account.rewardTotal)) USDT")
+                             + "\(Fmt.u(crypto.account.rewardTotal)) USDT"
+                             + (crypto.account.turnoverToUnlock > 0.01
+                                ? " · 还需 \(Fmt.u(crypto.account.turnoverToUnlock)) USDT 流水"
+                                : " · 已全部解锁"))
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                     }

@@ -233,7 +233,8 @@ final class CryptoStore: ObservableObject {
             let locked = account.lockedReward
             if locked > 0.01 {
                 return "可提现余额不足。奖励金还有 \(Fmt.u(locked)) USDT 未解锁，"
-                    + "需再累计 \(Fmt.u(account.turnoverToUnlock)) USDT 流水"
+                    + "需再累计 \(Fmt.u(account.turnoverToUnlock)) USDT 买卖流水"
+                    + "（在「币圈」买入再卖出即可，买卖各算一次）"
             }
             return "可提现余额不足，当前 \(Fmt.usdt(account.withdrawable))"
         }
@@ -253,6 +254,7 @@ final class CryptoStore: ObservableObject {
             account.withdrawals = Array(account.withdrawals.prefix(60))
         }
         Haptic.success()
+        SoundKit.shared.coin()
         return nil
     }
 

@@ -76,9 +76,14 @@ struct CryptoAccount: Codable {
     var records: [CryptoTradeRecord] = []
     var withdrawals: [Withdrawal] = []
 
-    /// 打码倍数：每 1 USDT 奖励需要 20 USDT 流水才能解锁提现。
-    /// 参照真实交易所的反洗钱规则 —— 白送的体验金不能提了就跑。
-    static let rewardMultiple: Double = 20
+    /// 打码倍数：每 1 USDT 奖励需要 3 USDT 流水才能解锁提现。
+    ///
+    /// 参照真实交易所的反洗钱规则 —— 白送的体验金不能提了就跑，
+    /// 但倍数不能定太高：定成 20 倍时，领完新手奖励（约 47 USDT）
+    /// 要打 940 USDT 流水才能提，而账户里一共只有 47 USDT 可周转，
+    /// 奖励金会变成一笔永远拿不到的死钱。
+    /// 3 倍是权衡后的值：买卖两个来回就能解锁，同时保留「想提先交易」的约束。
+    static let rewardMultiple: Double = 3
 
     /// 已被流水解锁、不再受提现限制的奖励金额
     var rewardUnlocked: Double {
@@ -91,6 +96,7 @@ struct CryptoAccount: Codable {
     }
 
     /// 可提现金额 = 余额 − 仍被锁定的奖励。
+    /// 入金的本金不受打码限制，随时可提；只有奖励部分要打够流水。
     /// 若奖励已被花掉，余额本来就低于锁定值，这里兜底成 0
     var withdrawable: Double {
         max(0, usdt - lockedReward)

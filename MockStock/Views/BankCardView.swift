@@ -206,9 +206,30 @@ struct BankCardView: View {
         } header: {
             Text("绑定银行卡")
         } footer: {
-            Text("需绑定本人名下银行卡。模拟绑定不会产生任何真实校验或扣款，"
-                 + "卡号仅保存在本机。")
+            // 按钮灰着却不说原因，用户只会以为功能坏了
+            if let reason = blockReason {
+                Text(reason).foregroundStyle(.orange)
+            } else {
+                Text("需绑定本人名下银行卡。模拟绑定不会产生任何真实校验或扣款，"
+                     + "卡号仅保存在本机。")
+            }
         }
+    }
+
+    /// 表单还差什么
+    private var blockReason: String? {
+        let digits = cardNumber.filter { $0.isNumber }
+        if digits.count < 16 || digits.count > 19 {
+            return "卡号需为 16–19 位数字，当前 \(digits.count) 位。"
+        }
+        if holder.trimmingCharacters(in: .whitespaces).count < 2 {
+            return "请填写持卡人姓名。"
+        }
+        let phones = phone.filter { $0.isNumber }
+        if phones.count != 11 {
+            return "预留手机号需为 11 位数字，当前 \(phones.count) 位。"
+        }
+        return nil
     }
 
     private func bind() {
