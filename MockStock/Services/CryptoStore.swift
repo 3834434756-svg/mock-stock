@@ -32,8 +32,13 @@ final class CryptoStore: ObservableObject {
     static let feeRate = 0.001
     /// 提现手续费率 1%
     static let withdrawFeeRate = 0.01
-    /// 单笔最低提现（USDT）
-    static let minWithdraw = 10.0
+    /// 单笔最低提现（USDT）。
+    ///
+    /// 不能定太高。奖励金全靠账户自己的钱反复买卖来打流水，
+    /// 每一轮往返都要被 0.1% 手续费磨掉一点。门槛定成 10 时，
+    /// 只领了注册奖励（10 USDT）的账户打完流水后余额约 9.96，
+    /// 差一点点就永远提不出来 —— 一笔看着在账上、却取不出的死钱。
+    static let minWithdraw = 1.0
     /// 人民币 → USDT 折算汇率
     static var rate: Double { FX.usdtToCNY }
 
@@ -108,6 +113,16 @@ final class CryptoStore: ObservableObject {
 
     /// 账户总资产（USDT）
     var totalAssets: Double { account.totalAssets(prices: positionPrices) }
+
+    /// 可提现额度（USDT）。
+    ///
+    /// 口径是「净值 − 仍被锁定的奖励」，再被现金余额截断：
+    /// - 先用净值而不是现金：奖励金买成币之后，卖出即可变现，
+    ///   不该因为"现金是 0"就把可提现额度显示成 0
+    /// - 再截断到现金：提现是从可用余额里扣的，超出余额的部分本来也提不出来
+    var withdrawable: Double {
+        min(account.usdt, max(0, totalAssets - account.lockedReward))
+    }
 
     /// 今日盈亏（USDT）：持仓按昨收价折算的浮盈
     var todayProfit: Double {
@@ -229,14 +244,8 @@ final class CryptoStore: ObservableObject {
         guard amount >= Self.minWithdraw else {
             return "单笔最低提现 \(Fmt.u(Self.minWithdraw)) USDT"
         }
-        guard amount <= account.withdrawable + 1e-6 else {
-            let locked = account.lockedReward
-            if locked > 0.01 {
-                return "可提现余额不足。奖励金还有 \(Fmt.u(locked)) USDT 未解锁，"
-                    + "需再累计 \(Fmt.u(account.turnoverToUnlock)) USDT 买卖流水"
-                    + "（在「币圈」买入再卖出即可，买卖各算一次）"
-            }
-            return "可提现余额不足，当前 \(Fmt.usdt(account.withdrawable))"
+        guard amount <= withdrawable + 1e-6 else {
+            return withdrawBlockReason(amount: amount)
         }
 
         let fee = amount * Self.withdrawFeeRate
@@ -256,6 +265,25 @@ final class CryptoStore: ObservableObject {
         Haptic.success()
         SoundKit.shared.coin()
         return nil
+    }
+
+    /// 提不出来时，把卡在哪一环说清楚。
+    ///
+    /// 之前这里只回一句「可提现余额不足」，用户看着账户里的钱
+    /// 完全不知道问题出在打码、门槛还是钱在持仓里 —— 只会认为功能坏了。
+    func withdrawBlockReason(amount: Double) -> String {
+        if account.lockedReward > 0.01 {
+            return "可提现 \(Fmt.u(withdrawable)) USDT。奖励金还有 "
+                + "\(Fmt.u(account.lockedReward)) USDT 未解锁，需再累计 "
+                + "\(Fmt.u(account.turnoverToUnlock)) USDT 买卖流水"
+                + "（在「币圈」买入再卖出即可，买卖各算一次）"
+        }
+        if account.usdt < amount - 1e-6 {
+            return "可用余额只有 \(Fmt.usdt(account.usdt))，另有 "
+                + "\(Fmt.usdt(positionsValue)) 在持仓里。"
+                + "先去「币圈」卖掉一部分持仓换成可用余额，再回来提现。"
+        }
+        return "可提现余额不足，当前 \(Fmt.usdt(withdrawable))"
     }
 
     /// 预估提现到账（人民币）

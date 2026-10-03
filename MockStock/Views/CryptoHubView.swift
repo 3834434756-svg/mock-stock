@@ -120,7 +120,10 @@ struct CryptoHubView: View {
             NavigationLink {
                 WithdrawView()
             } label: {
-                actionRow("提现", subtitle: "USDT 换成人民币到银行卡",
+                actionRow("提现",
+                          subtitle: crypto.withdrawable >= CryptoStore.minWithdraw
+                              ? "可提 \(Fmt.u(crypto.withdrawable)) USDT"
+                              : "USDT 换成人民币到银行卡",
                           icon: "arrow.up.circle.fill", color: .upRed)
             }
 

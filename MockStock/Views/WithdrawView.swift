@@ -13,15 +13,25 @@ struct WithdrawView: View {
     @State private var isError = false
 
     private var account: CryptoAccount { crypto.account }
-    private var amount: Double { Double(text) ?? 0 }
+    /// 金额解析。容忍粘贴进来的千分位与全角字符 ——
+    /// `Double("1,000")` 会返回 nil，之前会让用户以为"填了金额却没反应"
+    private var amount: Double {
+        let cleaned = text
+            .replacingOccurrences(of: ",", with: "")
+            .replacingOccurrences(of: "，", with: "")
+            .replacingOccurrences(of: " ", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return Double(cleaned) ?? 0
+    }
     private var est: (fee: Double, cny: Double) { crypto.withdrawEstimate(amount) }
 
-    /// 可提现额度是否够单笔最低门槛
-    private var enoughToWithdraw: Bool { account.withdrawable >= CryptoStore.minWithdraw }
+    /// 可提现额度。走 CryptoStore 的口径（净值 − 锁定奖励，再截断到现金），
+    /// 这样奖励金买成币之后不会显示成 0
+    private var available: Double { crypto.withdrawable }
     /// 前置条件（实名 + 绑卡）是否齐了
     private var prerequisiteOK: Bool { account.kycDone && account.bankCard != nil }
 
-    private var canSubmit: Bool { prerequisiteOK && amount > 0 }
+    private var canSubmit: Bool { prerequisiteOK && amount >= CryptoStore.minWithdraw && amount <= available + 1e-6 }
 
     var body: some View {
         Form {
@@ -46,9 +56,9 @@ struct WithdrawView: View {
         Section {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(Fmt.u(account.withdrawable))
+                    Text(Fmt.u(available))
                         .font(.system(size: 32, weight: .heavy, design: .rounded))
-                        .foregroundStyle(account.withdrawable > 0 ? Color.upRed : Color.secondary)
+                        .foregroundStyle(available > 0 ? Color.upRed : Color.secondary)
                         .monospacedDigit()
                     Text("USDT 可提现")
                         .font(.system(size: 12, weight: .semibold))
@@ -56,8 +66,8 @@ struct WithdrawView: View {
                 }
 
                 HStack(spacing: 0) {
-                    statCell("账户余额", Fmt.u(account.usdt))
-                    statCell("累计入金", Fmt.u(account.totalDeposit))
+                    statCell("可用余额", Fmt.u(account.usdt))
+                    statCell("持仓市值", Fmt.u(crypto.positionsValue))
                     statCell("奖励锁定", Fmt.u(account.lockedReward),
                              color: account.lockedReward > 0.01 ? .orange : .secondary)
                 }
@@ -71,6 +81,18 @@ struct WithdrawView: View {
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
+                }
+
+                // 钱都压在币里时，用户最需要知道的就是「先卖再提」
+                if available < CryptoStore.minWithdraw, crypto.positionsValue > 0.01 {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 11))
+                        Text("持仓里有 \(Fmt.usdt(crypto.positionsValue)) 可以变现。"
+                             + "先去「币圈」卖出换成可用余额，就能提现。")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(.secondary)
                 }
             }
             .padding(.vertical, 4)
@@ -145,8 +167,7 @@ struct WithdrawView: View {
             HStack(spacing: 8) {
                 ForEach([0.25, 0.5, 0.75, 1.0], id: \.self) { r in
                     Button {
-                        let v = (account.withdrawable * r * 1e8).rounded(.down) / 1e8
-                        text = v > 0 ? Fmt.shares(v) : ""
+                        fill(r)
                     } label: {
                         Text(r == 1.0 ? "全部" : "\(Int(r * 100))%")
                             .font(.system(size: 12))
@@ -230,23 +251,59 @@ struct WithdrawView: View {
         if account.bankCard == nil {
             return "还未绑定银行卡。绑定本人银行卡后即可提现。"
         }
-        if amount > account.withdrawable + 1e-6 {
-            return "可提现额度为 \(Fmt.usdt(account.withdrawable))，当前输入超出了这个额度。"
-        }
-        if amount > 0 { return nil }
 
-        if !enoughToWithdraw {
-            if account.lockedReward > 0.01 {
-                return "可提现 \(Fmt.usdt(account.withdrawable))，不足单笔最低 "
-                    + "\(Fmt.u(CryptoStore.minWithdraw)) USDT。"
-                    + "奖励金还有 \(Fmt.usdt(account.lockedReward)) 被锁定，"
-                    + "再完成 \(Fmt.u(account.turnoverToUnlock)) USDT 买卖流水即可解锁。"
+        // 已经填了金额，就针对这个金额说问题。
+        // 此前只要 amount > 0 就直接返回 nil，导致填 5 USDT（低于门槛）
+        // 时界面上一条提示都没有，点了提交才弹错 —— 很像"按钮坏了"
+        if amount > 0 {
+            if amount < CryptoStore.minWithdraw {
+                return "单笔最低提现 \(Fmt.u(CryptoStore.minWithdraw)) USDT，"
+                    + "当前 \(Fmt.u(amount)) USDT。"
             }
-            return "可提现 \(Fmt.usdt(account.withdrawable))，不足单笔最低 "
-                + "\(Fmt.u(CryptoStore.minWithdraw)) USDT。可以先入金，"
-                + "或去「币圈」做几笔买卖赚点流水。"
+            if amount > available + 1e-6 {
+                return "可提现额度为 \(Fmt.usdt(available))，"
+                    + "当前输入 \(Fmt.usdt(amount)) 超出了这个额度。"
+            }
+            return nil
+        }
+
+        // 还没填金额，说说整体卡在哪
+        if available < CryptoStore.minWithdraw {
+            if account.lockedReward > 0.01 {
+                return "奖励金还有 \(Fmt.usdt(account.lockedReward)) 被锁定，"
+                    + "再完成 \(Fmt.u(account.turnoverToUnlock)) USDT 买卖流水即可解锁"
+                    + "（在「币圈」买入再卖出即可，买卖各算一次）。"
+            }
+            if crypto.positionsValue > 0.01 {
+                return "可用余额 \(Fmt.usdt(account.usdt))，另有 "
+                    + "\(Fmt.usdt(crypto.positionsValue)) 在持仓里。"
+                    + "先去「币圈」卖出持仓，换成可用余额再提。"
+            }
+            if account.usdt > 0.01 {
+                return "可提现 \(Fmt.usdt(available))，不足单笔最低 "
+                    + "\(Fmt.u(CryptoStore.minWithdraw)) USDT。"
+            }
+            return "账户可用余额为 0。先去「币圈」入金，或到任务中心领取奖励。"
         }
         return "请输入提现金额。"
+    }
+
+    /// 快捷比例填充。
+    ///
+    /// 之前点「全部」在可提现为 0 时会把输入框设成空串 —— 点了完全没反应，
+    /// 用户只能认为功能坏了。现在点不动也要给个说法。
+    private func fill(_ ratio: Double) {
+        let v = (available * ratio * 1e8).rounded(.down) / 1e8
+        guard v >= CryptoStore.minWithdraw else {
+            text = ""
+            message = available > 0
+                ? "可提现 \(Fmt.usdt(available))，不足单笔最低 \(Fmt.u(CryptoStore.minWithdraw)) USDT。"
+                : (blockReason ?? "暂无可提现额度。")
+            isError = true
+            return
+        }
+        text = Fmt.shares(v)
+        message = nil
     }
 
     private func blockSection(_ reason: String) -> some View {
@@ -265,9 +322,9 @@ struct WithdrawView: View {
     /// 解锁引导：告诉用户具体该做什么，而不是只丢一个进度条
     @ViewBuilder
     private var unlockGuideSection: some View {
-        if account.withdrawable < CryptoStore.minWithdraw || account.lockedReward > 0.01 {
+        if available < CryptoStore.minWithdraw || account.lockedReward > 0.01 {
             Section {
-                if account.withdrawable < CryptoStore.minWithdraw {
+                if available < CryptoStore.minWithdraw {
                     NavigationLink {
                         DepositView()
                     } label: {
