@@ -1,16 +1,21 @@
 import SwiftUI
 
-/// 提现：USDT 换成人民币打到银行卡。
+/// 提现：把币账户的 USDT 换成人民币出金。
 ///
-/// 门槛参照真实交易所：必须实名 + 绑卡，且**奖励金要打够流水**才能提。
-/// 入金的本金不受打码限制，随时可提 —— 这一点必须在界面上说清楚，
-/// 否则用户看到「账户里明明有钱却提不出来」，只会当成 bug。
+/// 两条出口：
+/// - **银行卡**：需实名 + 绑卡，收 1% 手续费
+/// - **交易账户**：直接划回股票账户可用资金，内部划转不收费、不需实名绑卡
+///
+/// 两条出口都受「可提现额度」限制 —— 奖励金要打够流水才解锁，
+/// 不能靠换个出口绕过去。入金的本金不受打码限制，随时可提。
 struct WithdrawView: View {
     @ObservedObject private var crypto = CryptoStore.shared
 
     @State private var text = ""
     @State private var message: String?
     @State private var isError = false
+    /// 到账方式
+    @State private var channel: WithdrawChannel = .bankCard
 
     private var account: CryptoAccount { crypto.account }
     /// 金额解析。容忍粘贴进来的千分位与全角字符 ——
@@ -23,19 +28,23 @@ struct WithdrawView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return Double(cleaned) ?? 0
     }
-    private var est: (fee: Double, cny: Double) { crypto.withdrawEstimate(amount) }
+    private var est: (fee: Double, cny: Double) { crypto.withdrawEstimate(amount, channel: channel) }
 
     /// 可提现额度。走 CryptoStore 的口径（净值 − 锁定奖励，再截断到现金），
     /// 这样奖励金买成币之后不会显示成 0
     private var available: Double { crypto.withdrawable }
-    /// 前置条件（实名 + 绑卡）是否齐了
-    private var prerequisiteOK: Bool { account.kycDone && account.bankCard != nil }
+    /// 前置条件是否齐了。划回交易账户属于 App 内部划转，不需要实名和绑卡
+    private var prerequisiteOK: Bool {
+        guard channel.requiresKYCAndCard else { return true }
+        return account.kycDone && account.bankCard != nil
+    }
 
     private var canSubmit: Bool { prerequisiteOK && amount >= CryptoStore.minWithdraw && amount <= available + 1e-6 }
 
     var body: some View {
         Form {
             statusSection
+            channelSection
             if !prerequisiteOK { requirementSection }
             amountSection
             if amount > 0 { summarySection }
@@ -117,6 +126,46 @@ struct WithdrawView: View {
         .frame(maxWidth: .infinity)
     }
 
+    // MARK: - 到账方式
+
+    private var channelSection: some View {
+        Section {
+            Picker("到账方式", selection: $channel) {
+                ForEach(WithdrawChannel.allCases) { c in
+                    Text(c.label).tag(c)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: channel == .bankCard ? "creditcard.fill" : "arrow.left.arrow.right")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                Text(channelDetail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("到账方式")
+        } footer: {
+            Text("两种方式都受可提现额度限制 —— 划回交易账户同样要先把奖励金的流水打够，"
+                 + "否则被锁定的奖励可以直接绕开打码。")
+        }
+    }
+
+    private var channelDetail: String {
+        switch channel {
+        case .bankCard:
+            if let card = account.bankCard {
+                return "到 \(card.bankName) \(card.shortMasked)，收 1% 手续费"
+            }
+            return "还未绑定银行卡，需先完成实名认证与绑卡"
+        case .stockAccount:
+            return "按 1 USDT ≈ \(Fmt.price(CryptoStore.rate)) 元划入股票账户可用资金，不收手续费"
+        }
+    }
+
     // MARK: - 前置条件
 
     private var requirementSection: some View {
@@ -136,7 +185,8 @@ struct WithdrawView: View {
         } header: {
             Text("提现前置条件")
         } footer: {
-            Text("以上两项可在「币圈 → 实名与银行卡」里完成。")
+            Text("以上两项可在「币圈 → 实名与银行卡」里完成。"
+                 + "也可以把到账方式改成「交易账户」—— 那是 App 内部划转，不需要实名和绑卡。")
         }
     }
 
@@ -180,24 +230,39 @@ struct WithdrawView: View {
         } header: {
             Text("提现金额")
         } footer: {
-            Text("单笔最低 \(Fmt.u(CryptoStore.minWithdraw)) USDT，手续费 \(Fmt.price(CryptoStore.withdrawFeeRate * 100))%。")
+            Text("单笔最低 \(Fmt.u(CryptoStore.minWithdraw)) USDT"
+                 + (channel == .bankCard
+                    ? "，手续费 \(Fmt.price(channel.feeRate * 100))%。"
+                    : "，划转回交易账户不收手续费。"))
         }
     }
 
     private var summarySection: some View {
         Section {
             HStack {
-                Text("到账银行卡")
+                Text("到账方式")
                 Spacer()
-                Text(account.bankCard.map { "\($0.bankName) \($0.shortMasked)" } ?? "未绑定")
+                Text(channel.label)
                     .foregroundStyle(.secondary)
             }
-            HStack {
-                Text("手续费（\(Fmt.price(CryptoStore.withdrawFeeRate * 100))%）")
-                Spacer()
-                Text(Fmt.usdt(est.fee))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            if channel == .bankCard {
+                HStack {
+                    Text("到账银行卡")
+                    Spacer()
+                    Text(account.bankCard.map { "\($0.bankName) \($0.shortMasked)" } ?? "未绑定")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            // 内部划转不收手续费，这一行干脆不显示 ——
+            // Fmt.price(0) 会输出 "0.00000000"，摆一行 0 手续费反而像 bug
+            if channel == .bankCard {
+                HStack {
+                    Text("手续费（\(Fmt.price(channel.feeRate * 100))%）")
+                    Spacer()
+                    Text(Fmt.usdt(est.fee))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
             }
             HStack {
                 Text("预计到账")
@@ -210,7 +275,10 @@ struct WithdrawView: View {
         } header: {
             Text("到账预估")
         } footer: {
-            Text("按 1 USDT ≈ \(Fmt.price(CryptoStore.rate)) 元折算。")
+            Text("按 1 USDT ≈ \(Fmt.price(CryptoStore.rate)) 元折算。"
+                 + (channel == .bankCard
+                    ? "手续费从回款里扣除。"
+                    : "内部划转不产生手续费，全额划入股票账户。"))
         }
     }
 
@@ -245,11 +313,15 @@ struct WithdrawView: View {
     /// 之前这里完全静默 —— 用户点「全部」没反应、点提交没反应，
     /// 只能得出「提现坏了」这一个结论。现在把原因摆出来。
     private var blockReason: String? {
-        if !account.kycDone {
-            return "还未完成实名认证。去「币圈 → 实名与银行卡」完成认证后即可提现。"
-        }
-        if account.bankCard == nil {
-            return "还未绑定银行卡。绑定本人银行卡后即可提现。"
+        if channel.requiresKYCAndCard {
+            if !account.kycDone {
+                return "还未完成实名认证。去「币圈 → 实名与银行卡」完成认证后即可提现，"
+                    + "或把到账方式改成「交易账户」直接划回股票账户。"
+            }
+            if account.bankCard == nil {
+                return "还未绑定银行卡。绑定本人银行卡后即可提现，"
+                    + "或把到账方式改成「交易账户」直接划回股票账户。"
+            }
         }
 
         // 已经填了金额，就针对这个金额说问题。
@@ -361,7 +433,7 @@ struct WithdrawView: View {
                             Text(Fmt.usdt(w.amount))
                                 .font(.system(size: 14, weight: .medium))
                                 .monospacedDigit()
-                            Text(w.cardTail + " · " + w.status.label)
+                            Text(w.targetLabel + " · " + w.status.label)
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
@@ -386,11 +458,12 @@ struct WithdrawView: View {
     }
 
     private func submit() {
-        if let err = crypto.withdraw(usdt: amount) {
+        if let err = crypto.withdraw(usdt: amount, to: channel) {
             message = err
             isError = true
         } else {
-            message = "提现申请已提交：\(Fmt.usdt(amount)) → \(Fmt.money(est.cny))"
+            let target = channel == .bankCard ? "银行卡" : "股票账户"
+            message = "提现申请已提交：\(Fmt.usdt(amount)) → \(Fmt.money(est.cny))（\(target)）"
             isError = false
             text = ""
         }

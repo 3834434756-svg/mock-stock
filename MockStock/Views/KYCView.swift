@@ -136,7 +136,10 @@ struct KYCView: View {
             Button {
                 crypto.verifyKYC(name: name.trimmingCharacters(in: .whitespaces),
                                  idNo: idNo.trimmingCharacters(in: .whitespaces))
-                message = "认证通过，20 USDT 奖励已发放，去任务中心领取"
+                // `verifyKYC` 只标记认证状态、解锁提现，**不会直接发奖励** ——
+                // 奖励统一走任务中心的领取流程（唯一入口，避免重复入账）。
+                // 这里必须如实说清楚，否则用户会以为账上已经多了 20 USDT
+                message = "认证通过，提现功能已解锁。20 USDT 奖励到「任务中心」领取"
                 isError = false
             } label: {
                 Text("提交认证")

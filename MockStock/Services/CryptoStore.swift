@@ -30,7 +30,8 @@ final class CryptoStore: ObservableObject {
 
     /// 现货手续费率 0.1%（买卖双向都收）
     static let feeRate = 0.001
-    /// 提现手续费率 1%
+    /// 提现手续费率 1%（仅「提到银行卡」时收取）。
+    /// 划回交易账户属于内部划转，费率为 0 —— 见 `WithdrawChannel.feeRate`
     static let withdrawFeeRate = 0.01
     /// 单笔最低提现（USDT）。
     ///
@@ -120,6 +121,9 @@ final class CryptoStore: ObservableObject {
     /// - 先用净值而不是现金：奖励金买成币之后，卖出即可变现，
     ///   不该因为"现金是 0"就把可提现额度显示成 0
     /// - 再截断到现金：提现是从可用余额里扣的，超出余额的部分本来也提不出来
+    ///
+    /// 这个额度对「银行卡」和「交易账户」两条出口一视同仁 ——
+    /// 打码锁的是奖励金本身，不能靠换个出口绕过去。
     var withdrawable: Double {
         min(account.usdt, max(0, totalAssets - account.lockedReward))
     }
@@ -235,11 +239,48 @@ final class CryptoStore: ObservableObject {
         return nil
     }
 
-    /// 提现：USDT 换成人民币打到银行卡。
-    /// 前置条件是实名的 + 绑了卡 + 金额在可提现额度内（奖励金要打够流水）
+    /// 提现：按 `channel` 决定出金到银行卡还是划回交易账户。
+    ///
+    /// 两条出口共用同一套闸门 —— 交易账户虽然不需要实名和绑卡，
+    /// 但**同样要过可提现额度（打码）这一关**，否则锁定的奖励金
+    /// 可以直接划回股票账户，打码就白做了。
+    func withdraw(usdt amount: Double, to channel: WithdrawChannel) -> String? {
+        if let err = withdrawGuard(amount: amount, channel: channel) { return err }
+
+        let fee = amount * channel.feeRate
+        let cny = (amount - fee) * Self.rate
+
+        account.usdt -= amount
+        account.totalWithdraw += amount
+
+        let tail: String
+        switch channel {
+        case .bankCard:
+            tail = account.bankCard?.shortMasked ?? ""
+        case .stockAccount:
+            tail = ""
+            // 内部划转：直接打进股票账户的可用资金
+            AccountStore.shared.account.cash += cny
+        }
+
+        pushWithdrawal(amount: amount, fee: fee, cny: cny, tail: tail, channel: channel)
+        Haptic.success()
+        SoundKit.shared.coin()
+        return nil
+    }
+
+    /// 兼容旧调用：不带到账方式时默认提到银行卡
     func withdraw(usdt amount: Double) -> String? {
-        guard account.kycDone else { return "请先完成实名认证" }
-        guard let card = account.bankCard else { return "请先绑定银行卡" }
+        withdraw(usdt: amount, to: .bankCard)
+    }
+
+    /// 出金闸门：实名 / 绑卡 / 最低额 / 可提现额度。
+    /// 顺序与原实现一致，保证错误文案不变。
+    private func withdrawGuard(amount: Double, channel: WithdrawChannel) -> String? {
+        if channel.requiresKYCAndCard {
+            guard account.kycDone else { return "请先完成实名认证" }
+            guard account.bankCard != nil else { return "请先绑定银行卡" }
+        }
         guard amount > eps else { return "请输入提现金额" }
         guard amount >= Self.minWithdraw else {
             return "单笔最低提现 \(Fmt.u(Self.minWithdraw)) USDT"
@@ -247,24 +288,19 @@ final class CryptoStore: ObservableObject {
         guard amount <= withdrawable + 1e-6 else {
             return withdrawBlockReason(amount: amount)
         }
+        return nil
+    }
 
-        let fee = amount * Self.withdrawFeeRate
-        let net = amount - fee
-        let cny = net * Self.rate
-
-        account.usdt -= amount
-        account.totalWithdraw += amount
+    private func pushWithdrawal(amount: Double, fee: Double, cny: Double,
+                                tail: String, channel: WithdrawChannel) {
         account.withdrawals.insert(
             Withdrawal(amount: amount, fee: fee, received: cny,
-                       rate: Self.rate, cardTail: card.shortMasked, date: Date()),
+                       rate: Self.rate, cardTail: tail, date: Date(), channel: channel),
             at: 0
         )
         if account.withdrawals.count > 60 {
             account.withdrawals = Array(account.withdrawals.prefix(60))
         }
-        Haptic.success()
-        SoundKit.shared.coin()
-        return nil
     }
 
     /// 提不出来时，把卡在哪一环说清楚。
@@ -286,9 +322,10 @@ final class CryptoStore: ObservableObject {
         return "可提现余额不足，当前 \(Fmt.usdt(withdrawable))"
     }
 
-    /// 预估提现到账（人民币）
-    func withdrawEstimate(_ amount: Double) -> (fee: Double, cny: Double) {
-        let fee = amount * Self.withdrawFeeRate
+    /// 预估提现到账（人民币）。`channel` 决定收不收手续费
+    func withdrawEstimate(_ amount: Double,
+                          channel: WithdrawChannel = .bankCard) -> (fee: Double, cny: Double) {
+        let fee = amount * channel.feeRate
         return (fee, (amount - fee) * Self.rate)
     }
 

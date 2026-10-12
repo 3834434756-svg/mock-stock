@@ -87,9 +87,27 @@ struct CryptoAccount: Codable {
     /// 3 倍意味着必须做两轮，做完余额只剩 0.996R —— 小额账户会掉到提现门槛以下。
     static let rewardMultiple: Double = 2
 
+    /// 流水判定的容差比例。
+    ///
+    /// 买卖双向各收 0.1% 手续费，而 `turnover` 记的是**扣费前**的成交额：
+    /// 一轮全仓往返实际只产生 `R + R×(1−0.001) = 1.999R` 流水，**永远到不了 2R**。
+    /// 不留容差的话 `lockedReward` 会永久残留 `0.0005R`
+    /// （45 USDT 奖励 → 0.0225 永远解不掉），币圈首页的进度条永远走不满，
+    /// 用户观感就是「奖励永远解不开」。
+    ///
+    /// 容差取 0.999 正好等于一轮往返被手续费吃掉的那部分，
+    /// 不会让「不交易也能解锁」成为可能。
+    private static let turnoverTolerance: Double = 0.999
+
+    /// 解锁全部奖励所需的流水
+    private var turnoverRequired: Double {
+        rewardTotal * Self.rewardMultiple * Self.turnoverTolerance
+    }
+
     /// 已被流水解锁、不再受提现限制的奖励金额
     var rewardUnlocked: Double {
-        min(rewardTotal, turnover / Self.rewardMultiple)
+        if turnover >= turnoverRequired { return rewardTotal }
+        return min(rewardTotal, turnover / Self.rewardMultiple)
     }
 
     /// 仍被锁定的奖励金
@@ -103,9 +121,12 @@ struct CryptoAccount: Codable {
         return min(1, rewardUnlocked / rewardTotal)
     }
 
-    /// 还要多少流水才能把奖励全部解锁
+    /// 还要多少流水才能把奖励全部解锁。
+    /// 已解锁时返回 0 —— 否则会显示「还需 0.05 USDT 流水」这种
+    /// 和「奖励锁定 0.00」自相矛盾的文案
     var turnoverToUnlock: Double {
-        max(0, rewardTotal * Self.rewardMultiple - turnover)
+        guard lockedReward > 0 else { return 0 }
+        return max(0, turnoverRequired - turnover)
     }
 
     func position(for code: String) -> CryptoPosition? {
